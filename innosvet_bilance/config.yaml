@@ -1,0 +1,27 @@
+name: "innosvět – finanční bilance (ALPHA)"
+version: "0.1.0-alpha"
+slug: "innosvet_bilance"
+description: "Pouze čtení předpokládaného přeplatku/nedoplatku plynu a elektřiny"
+arch:
+  - amd64
+startup: services
+boot: auto
+init: false
+services:
+  - mqtt:need
+options:
+  innogy_username: ""
+  innogy_password: ""
+  gas_contract_id: ""
+  electricity_contract_id: ""
+  read_on_start: true
+  schedule: "05:55,11:55,17:55,23:55"
+  timezone: "Europe/Prague"
+schema:
+  innogy_username: str
+  innogy_password: password
+  gas_contract_id: str
+  electricity_contract_id: str
+  read_on_start: bool
+  schedule: str
+  timezone: str

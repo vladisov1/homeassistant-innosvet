@@ -1,68 +1,9 @@
-# innogy innosvět – doplněk pro Home Assistant OS
+# innogy innosvět – Home Assistant OS (0.1.0-alpha8)
 
-**Verze 0.1.0-alpha7 – čtení bilancí, ověřený kontrolní režim plynoměru a experimentální dvoukrokový ostrý zápis (dosud neověřený v HAOS).**
+Aktuální alfa doplněk rozšiřuje funkční bilanci obou smluv a dříve otestovaný automatický zápis plynoměru o **volitelné čtení nákladů a záloh**. Podrobnosti v [DOCS](innosvet_bilance/DOCS.md) a [CHANGELOG](innosvet_bilance/CHANGELOG.md).
 
-**Nově potvrzené nastavení:** přihlašovací jméno a heslo se zadávají jednou v **Konfiguraci** nainstalovaného doplňku (pole `innogy_username` / `innogy_password`); při aktualizaci se nepřepisují do Pythonu. Způsob přihlášení po vypršení relace je stále experimentální.
+- Dříve uložené přihlašovací údaje, smlouvy, entity a časy se nepřejmenovávají.
+- `finance_extra_enabled` je nová volitelná volba, standardně `false`.
+- `gas_write_enabled` a `gas_write_confirmed` zůstávají nezávislé.
 
-Tento repozitář lze přidat jako **vlastní repozitář aplikací/doplňků** v Home Assistant OS (Nastavení → Aplikace → Instalovat aplikaci → ⋮ → Repozitáře). Do pole se vkládá **URL vašeho nově vytvořeného GitHub repozitáře, nikoliv odkaz na ZIP soubor**. Tento ZIP je pouze pro první naplnění repozitáře GitHub.
-
-## Obsah
-
-- `repository.yaml` – identifikace repozitáře pro Supervisor.
-- `innosvet_bilance/` – instalační složka doplňku.
-- `innosvet_bilance/DOCS.md` – podrobný návod na konfiguraci a omezení.
-
-## Co doplněk dělá
-
-Čte **předpokládaný přeplatek / nedoplatek** plynu a elektřiny z innosvěta čtyřikrát denně (`05:55`, `11:55`, `17:55`, `23:55`) a publikuje dvě číselné entity pomocí MQTT discovery. **Nečte stav elektroměru z VisionQ a nepočítá náklady. Odeslání plynu je samostatná, výslovně povolovaná experimentální funkce.**
-
-**Experimentální zápis plynoměru je přítomen, ale není v HAOS ověřen. Kontrolní režim neodesílá odečty.** Načítání finančních údajů bylo ověřeno na Windows s uloženou relací Playwright; **instalace v HAOS, automatické přihlášení a MQTT již byly uživatelsky ověřeny pro finanční bilance**.
-
-## Instalace z GitHubu
-
-1. Na svém GitHub účtu založte prázdný repozitář, např. `homeassistant-innosvet`.
-2. Rozbalte tento archiv a nahrajte **jeho obsah** do kořene repozitáře, tak aby `repository.yaml` byl přímo na nejvyšší úrovni. Nenahrávejte samotný ZIP místo souborů.
-3. Otevřete Home Assistant OS → Nastavení → Aplikace → Instalovat aplikaci → ⋮ → Repozitáře.
-4. Přidejte URL repozitáře `https://github.com/VAŠE_JMÉNO/homeassistant-innosvet` (jde jen o příklad; skutečnou adresu získáte po založení).
-5. Najděte doplněk `innosvět – plyn a bilance (ALPHA)`, nainstalujte a vyplňte nastavení.
-6. Před spuštěním ověřte přítomnost MQTT brokeru a integrace MQTT. Pokyny a upozornění v `innosvet_bilance/DOCS.md`.
-
-**Kompatibilita:** pouze `amd64`; první sestavení může být pomalé a nemusí projít na každé instalaci. Pokud se doplněk nenabídne, ověřte, že je `repository.yaml` v kořeni a že architektura HAOS odpovídá.
-
-**Bezpečnost:** GitHub repozitář nesmí obsahovat přihlašovací údaje, cookies, `options.json`, soubory profilu prohlížeče ani jiné tokeny. Heslo se zadává až v konfiguraci nainstalovaného doplňku. Hesla ani tokeny neposílejte do chatu.
-
-
-## Připravovaný automatický zápis plynoměru (0.1.0-alpha – experimentální)
-
-V této aktualizaci je nově přidána **volitelná funkce odeslání** z entity
-`sensor.plynomer_celkovy_stav`. Výchozí konfigurace `gas_write_enabled: false`
-znamená, že **se nic neodesílá**. Po zapnutí prvního přepínače se ověří
-hodnota senzoru, otevře a vyplní formulář plynu bez jakéhokoli POST na portál; odeslání vyžaduje ještě nezávislé výslovné zapnutí
-`gas_write_confirmed: true`.
-
-Časy se zadávají společným polem `schedule`, například
-`05:55,11:55,17:55,23:55`. Při každém termínu se nejprve načtou finanční
-bilance a pak se samostatně vyhodnotí zápis plynu. Zápis se při spuštění
-aplikace **mimo plánovaný čas neprovádí**.
-
-**Zatím nebylo ověřeno automatické kliknutí na „Pokračovat“ a „Odeslat odečet“ v HAOS**.
-Proto neaktivujte `gas_write_confirmed` před řízeným testováním. Aplikace
-ukládá trvalý deník pokusů a po nejasném výsledku zápis automaticky
-neopakuje. Odesílá se celé m³ (desetinná část se odřízne); stejnou hodnotu lze
-odeslat v různých plánovaných časech.
-
-Podrobnosti jsou v `innosvet_bilance/DOCS.md`.
-
-## Oprava alpha3
-
-Doplněno oprávnění `homeassistant_api: true` pro čtení senzoru HA přes Supervisor a české popisky nastavení. Pokud bylo v protokolu `HTTPError`, nový protokol upřesní HTTP stav. Pro bezpečný test zapněte pouze `gas_write_enabled` a ponechte `gas_write_confirmed: false`. To platilo pro alpha3. **V alpha4** testovací režim navíc otevře a vyplní formulář, nikoli však rekapitulaci vyžadující POST.
-
-## Co je nového v alpha6
-
-Po neúspěšném ostrém testu alpha5 (TimeoutError na tlačítku „Pokračovat“) doplněna diagnostika dostupnosti tlačítka, počtu skutečně povolených POST požadavků, HTTP stavů a přítomnosti rekapitulace. Kliknutí nyní odděluje čekání na navigaci od síťové odpovědi a podporuje i input submit. **Ostré odeslání zůstává experimentální a není ověřené.** Při nejistotě se běh zastaví bez opakování.
-
-## Dřívější změny alpha5
-
-Při `gas_write_enabled: true` a `gas_write_confirmed: false` zůstává bezpečný náhled formuláře bez POST, stejně jako ve fyzicky otestované alpha4. Při zapnutí obou přepínačů se teprve spustí **ostrý pokus**, který zahrnuje první i finální potvrzení. Každá nejednoznačná situace znamená zastavení a žádné automatické opakování daného plánovaného termínu. Protože finální dvoukrokový postup alpha5 dosud nebyl fyzicky ověřen v HAOS, nechte `gas_write_confirmed` vypnutý až do vědomého řízeného testu. Protokol nikdy nezaznamenává hesla ani přihlašovací tokeny.
-
-Při chybě po prvním potvrzovacím kroku zkontrolujte historii odečtů přímo v innosvětě; označení `uncertain` v deníku neznamená, že zápis neproběhl.
+**Neinstalujte bez zálohy. Rozšířené finance nejsou zatím ověřené v HAOS; pokud selže jejich rozpoznání, dosavadní finanční bilance mají zůstat funkční.**

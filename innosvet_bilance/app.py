@@ -69,6 +69,7 @@ def load_options():
     if not times or len(set(times)) != len(times) or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in times):
         raise ValueError("schedule musí obsahovat unikátní časy HH:MM oddělené čárkami")
     opts["times"] = sorted(times)
+    opts["finance_extra_enabled"] = bool(opts.get("finance_extra_enabled", False))
     opts["gas_write_enabled"] = bool(opts.get("gas_write_enabled", False))
     opts["gas_write_confirmed"] = bool(opts.get("gas_write_confirmed", False))
     opts["gas_entity_id"] = str(opts.get("gas_entity_id", "sensor.plynomer_celkovy_stav")).strip()
@@ -135,6 +136,25 @@ def publish_discovery(client):
         "availability_topic": STATE_PREFIX + "/availability",
         "device": device, "icon": "mdi:gas-cylinder",
     }, ensure_ascii=False))
+    device_extra = dict(device)
+    for kind, name in (("plyn", "Plyn"), ("elektrina", "Elektřina")):
+        for key, label, icon, unit in (
+            ("dosavadni_naklady_kc", "dosavadní náklady innogy", "mdi:cash", "Kč"),
+            ("predpoklad_podle_zaloh_kc", "náklady podle záloh", "mdi:chart-line", "Kč"),
+            ("odhad_konec_obdobi_kc", "odhad nákladů na konci období", "mdi:chart-timeline-variant", "Kč"),
+            ("mesicni_zaloha_kc", "předepsaná záloha", "mdi:cash-clock", "Kč"),
+            ("budouci_zbyva_kc", "zbývající předepsané zálohy", "mdi:cash-multiple", "Kč"),
+            ("nejblizsi_zbyva_kc", "nejbližší neuhrazená částka", "mdi:calendar-clock", "Kč"),
+        ):
+            mqtt_publish(client, f"homeassistant/sensor/innosvet_{kind}_{key}/config", json.dumps({
+                "name": f"innosvět {name} – {label}",
+                "unique_id": f"innosvet_{kind}_{key}_v1",
+                "state_topic": f"{STATE_PREFIX}/{kind}/finance/{key}",
+                "json_attributes_topic": f"{STATE_PREFIX}/{kind}/finance/{'cost_attributes' if key in ('dosavadni_naklady_kc', 'predpoklad_podle_zaloh_kc', 'odhad_konec_obdobi_kc') else 'payment_attributes'}",
+                "availability_topic": STATE_PREFIX + "/availability",
+                "unit_of_measurement": unit,
+                "device": device_extra, "icon": icon,
+            }, ensure_ascii=False))
     mqtt_publish(client, STATE_PREFIX + "/availability", "online")
 
 
@@ -208,6 +228,7 @@ def read_balances(options):
         "elektrina": BASE + "/dashboard/detail-smlouvy-elektrina/naklady-a-spotreba?contractid=" + options["electricity_contract_id"],
     }
     results = {}
+    finance_results = {}
     with sync_playwright() as playwright:
         context = playwright.firefox.launch_persistent_context(
             user_data_dir=str(PROFILE), headless=True, locale="cs-CZ", accept_downloads=False,
@@ -217,8 +238,14 @@ def read_balances(options):
             # provider may use POST for authentication. innosvět can never write.
             def guard(route):
                 request = route.request
-                if (urlparse(request.url).hostname == HOST
-                        and request.method.upper() not in ("GET", "HEAD", "OPTIONS")):
+                host = urlparse(request.url).hostname
+                path = urlparse(request.url).path
+                # The portal's login handshake is the only permitted non-GET.
+                # No payment change or meter-reading endpoint may be used here.
+                login_handshake = (host == HOST and request.method.upper() == "POST"
+                                   and path == "/innogy24ajax/SendLoginInfo"
+                                   and options.get("finance_extra_enabled", False))
+                if host == HOST and request.method.upper() not in ("GET", "HEAD", "OPTIONS") and not login_handshake:
                     route.abort()
                 else:
                     route.continue_()
@@ -243,11 +270,26 @@ def read_balances(options):
                     raise RuntimeError("Neplatná bilance: " + kind)
                 signed = amount if read["typ"] == "přeplatek" else -amount
                 results[kind] = {"typ": read["typ"], "castka_kc": float(amount), "bilance_kc": float(signed)}
+                if options.get("finance_extra_enabled", False):
+                    from finance_extra import read_cost_graph, read_payments
+                    cid = options["gas_contract_id"] if kind == "plyn" else options["electricity_contract_id"]
+                    extra = {}
+                    try:
+                        extra["naklady"] = read_cost_graph(active, cid, kind)
+                        LOG.info("%s: graf nákladů načten", kind.capitalize())
+                    except Exception as exc:
+                        LOG.warning("%s: graf nákladů nenalezen (%s); předchozí hodnoty zachovány", kind.capitalize(), type(exc).__name__)
+                    try:
+                        extra["zalohy"] = read_payments(active, cid)
+                        LOG.info("%s: rozpis záloh načten", kind.capitalize())
+                    except Exception as exc:
+                        LOG.warning("%s: rozpis záloh nenalezen (%s); předchozí hodnoty zachovány", kind.capitalize(), type(exc).__name__)
+                    finance_results[kind] = extra
         finally:
             context.close()
     if len(results) != 2:
         raise RuntimeError("Neúplné finanční údaje")
-    return results
+    return results, finance_results
 
 
 def save_result(data):
@@ -267,6 +309,23 @@ def report_ok(client, results, now):
     mqtt_publish(client, STATE_PREFIX + "/last_read_status", "ok")
 
 
+def publish_finance(client, extra, now):
+    """Publish independent subcategories; failures never erase previous values."""
+    for kind, fragments in extra.items():
+        if 'naklady' in fragments:
+            costs = dict(fragments['naklady'])
+            for key in ('dosavadni_naklady_kc', 'predpoklad_podle_zaloh_kc', 'odhad_konec_obdobi_kc'):
+                mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/{key}", f"{costs[key]:.2f}")
+            costs.update(updated_at=now, source='innosvet', read_only=True)
+            mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/cost_attributes", json.dumps(costs, ensure_ascii=False))
+        if 'zalohy' in fragments:
+            payments = dict(fragments['zalohy'])
+            for key in ('mesicni_zaloha_kc', 'budouci_zbyva_kc', 'nejblizsi_zbyva_kc'):
+                mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/{key}", f"{payments[key]:.2f}")
+            payments.update(updated_at=now, source='innosvet', read_only=True)
+            mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/payment_attributes", json.dumps(payments, ensure_ascii=False))
+
+
 def handle_stop(_signum, _frame):
     global STOP
     STOP = True
@@ -282,7 +341,7 @@ def main():
     try:
         client = mqtt_connection()
         publish_discovery(client)
-        LOG.info("Spuštěno innosvět 0.1.0-alpha6; časy: %s; automatický zápis plynu: %s",
+        LOG.info("Spuštěno innosvět 0.1.0-alpha8; časy: %s; automatický zápis plynu: %s",
                  ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
         if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
             LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")
@@ -298,11 +357,13 @@ def main():
                 if due:
                     last_day_slot = slot
                 try:
-                    result = read_balances(options)
+                    result, finance_extra = read_balances(options)
                     stamped = datetime.now(tz).isoformat(timespec="seconds")
                     data = {"updated_at": stamped, "source": "innosvet", **result}
                     save_result(data)
                     report_ok(client, result, stamped)
+                    if options.get("finance_extra_enabled", False):
+                        publish_finance(client, finance_extra, stamped)
                     LOG.info("Bilance plynu a elektřiny byly načteny a publikovány")
                 except Exception as exc:
                     # Do not print URLs, cookies, exception details or credentials.

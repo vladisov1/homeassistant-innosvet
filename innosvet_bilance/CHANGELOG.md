@@ -1,3 +1,13 @@
+## 0.1.0-alpha8 (2026-11-07) – rozšířené finance, testovací vydání
+
+- Volitelné čtení `BillsGraph` pro plyn a elektřinu (13 bodů vývoje nákladů).
+- Nová podrobná evidence předepsaných záloh z HTML včetně splatnosti, započtené platby a zůstatku, s rozdílnými budoucími částkami.
+- Šest nových MQTT senzorů na energii: průběžné náklady dle innogy (hodnota bodu aktuálního měsíce), náklady podle záloh, odhad na konci období, předepsaná záloha, zbývající budoucí zálohy, nejbližší neuhrazená částka.
+- Atributy s podkladovými měsíčními body a platebním kalendářem (bez hesel a identifikátorů smluv).
+- Původní automatické odeslání plynu a čtení přeplatku/nedoplatku zachováno.
+- Rozšířené finance **výchozí vypnuté**, protože ještě nejsou fyzicky otestované v HAOS.
+- **Zatím neimplementováno:** grafová karta Lovelace a automatické doporučení změny záloh. Surové měsíční body pro budoucí graf se zveřejňují jako atributy.
+
 ## 0.1.0-alpha7 (2026-11-07) – diagnostika kliknutí a bezpečný klávesový fallback
 
 - Po alpha6, kde tlačítko Pokračovat bylo viditelné/aktivní, ale Playwright kliknutí skončilo TimeoutError bez POST.

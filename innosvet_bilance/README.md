@@ -1,12 +1,12 @@
-# innosvět – finanční bilance (ALPHA 0.1.0-alpha7)
+# innosvět – finanční údaje a zápis plynu (ALPHA 0.1.0-alpha8)
 
-Testovací doplněk Home Assistant OS pro čtení předpokládané bilance plynu a elektřiny z portálu innosvět. Publikuje údaje přes MQTT discovery.
+Home Assistant OS doplněk pro **čtení finančních údajů innogy** a volitelný automatický zápis stavů plynoměru. Stavy plynu se získávají přímo ze senzoru Home Assistantu; elektřina se **nikdy nezapisuje**.
 
-**Pouze čtení. Zápis plynoměru není implementován.**
+- Funkční původní čtení přeplatků a nedoplatků pro obě energie.
+- Nové volitelné čtení grafu nákladů (`BillsGraph`) a skutečného platebního kalendáře záloh, včetně částečných úhrad a rozdílných částek v jednotlivých měsících.
+- MQTT senzory pro částky a atributy s třinácti body grafu i celým rozpisem záloh.
+- Zachován ověřený zápis plynoměru z alpha7; výchozí nastavení zápisu je vypnuté.
 
-Podrobnosti, konfigurace, omezení a bezpečnostní upozornění: [DOCS.md](DOCS.md).
+**Rozšířené finance jsou zatím testovací:** přepínač „Načítat rozšířené finanční údaje“ je zpočátku vypnutý. Po aktualizaci se nezapne zápis plynu ani nové finanční čtení samo.
 
-
-### Oprava alpha3 – senzor HA a bezpečný test
-
-Doplněk potřebuje v manifestu `homeassistant_api: true`, protože čte `sensor.plynomer_celkovy_stav` prostřednictvím `/core/api/states/...`. `gas_write_enabled: true` a `gas_write_confirmed: false` **jen ověří hodnotu senzoru; formulář innosvěta v tomto režimu neotevírá**. Skutečné automatické odesílání do innosvěta zatím není testováno v HAOS, proto druhý přepínač ponechte vypnutý. Názvy a popisy nastavení jsou přeloženy v `translations/cs.yaml`.
+Podrobnosti a přesný rozsah: [DOCS.md](DOCS.md). Změny: [CHANGELOG.md](CHANGELOG.md).

@@ -20,6 +20,9 @@ configuration:
   gas_write_confirmed:
     name: "Povolit skutečné odesílání plynu"
     description: "Společně s aktivovanou kontrolou povolí skutečný zápis do innosvěta. Nezapínejte před dokončením testů."
+  finance_extra_enabled:
+    name: "Načítat rozšířené finanční údaje"
+    description: "Čte náklady z grafu a rozpis uhrazených i budoucích záloh pro obě smlouvy. Nikoho neplatí ani nemění zálohy."
   read_on_start:
     name: "Načíst údaje při spuštění"
     description: "Po spuštění doplňku ihned načte finanční bilance. Odečet plynoměru se mimo plánovaný čas neodesílá."

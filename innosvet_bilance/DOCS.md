@@ -1,4 +1,4 @@
-# innosvět – finanční bilance (ALPHA 0.1.0-alpha7)
+# innosvět – finanční bilance (ALPHA 0.1.0-alpha8)
 
 Testovací doplněk pro Home Assistant OS, **výhradně pro čtení** částky předpokládaného přeplatku nebo nedoplatku elektřiny a plynu z innosvěta. Zobrazené bilance pouze přenáší, nepočítá je.
 
@@ -53,7 +53,7 @@ Výchozí časy: `05:55,11:55,17:55,23:55` v `Europe/Prague`. Čtení proběhne 
 
 ## Stav ověření
 
-✅ Čtení obou finančních bilancí, přihlášení a MQTT discovery byly následně uživatelsky ověřeny také v HAOS. Nový kontrolní režim webového formuláře alpha4 v HAOS ověřen dosud nebyl.
+✅ Čtení obou finančních bilancí, přihlášení a MQTT discovery byly následně uživatelsky ověřeny také v HAOS. Kontrolní režim alpha4 i ostrý zápis alpha7 byly následně uživatelsky ověřeny v HAOS; tato část popisuje stav před těmito testy.
 
 
 ## Automatický zápis plynoměru – nové experimentální nastavení
@@ -98,7 +98,7 @@ Nejde o EAN, EIC ani číslo měřidla.
 
 ### Oprava alpha3 – senzor HA a bezpečný test
 
-Doplněk potřebuje v manifestu `homeassistant_api: true`, protože čte `sensor.plynomer_celkovy_stav` prostřednictvím `/core/api/states/...`. `gas_write_enabled: true` a `gas_write_confirmed: false` v alpha3 jen ověřily senzor. **V alpha4 navíc otevřou a vyplní formulář plynu bez jediného POST na innosvět**. Skutečné automatické odesílání do innosvěta zatím není testováno v HAOS, proto druhý přepínač ponechte vypnutý. Názvy a popisy nastavení jsou přeloženy v `translations/cs.yaml`.
+Doplněk potřebuje v manifestu `homeassistant_api: true`, protože čte `sensor.plynomer_celkovy_stav` prostřednictvím `/core/api/states/...`. `gas_write_enabled: true` a `gas_write_confirmed: false` v alpha3 jen ověřily senzor. **V alpha4 navíc otevřou a vyplní formulář plynu bez jediného POST na innosvět**. Později bylo skutečné odeslání v alpha7 uživatelsky ověřeno. Před každým dalším zapnutím zvažte provozní riziko plánovaných zápisů. Názvy a popisy nastavení jsou přeloženy v `translations/cs.yaml`.
 
 ### Alpha4 – co ověří kontrolní režim
 
@@ -106,4 +106,18 @@ Při naplánovaném čase se otevře správná smlouva, stránka „Průběžný
 
 ## Poznámka k alpha5 (experimentální ostrý zápis)
 
-Ověřeno uživatelem: kontrolní režim alpha4 prošel až k vyplnění formuláře (bez POST). V alpha5 přibyla **dosud nevyzkoušená** dvoukroková ostrá větev. Je vypnutá, dokud nejsou zapnuté oba přepínače `gas_write_enabled` a `gas_write_confirmed`. Ostrý režim je určen jen pro vědomý, sledovaný test; poté ověřte zapsanou hodnotu v historii innosvěta. Při neočekávané změně formuláře nebo nepotvrzené odpovědi doplněk zápis neopakuje a v deníku `/data/gas_write_journal.json` zachová stav pokusu. Doba plánování se řídí společným polem `schedule`.
+Ověřeno uživatelem: kontrolní režim alpha4 prošel až k vyplnění formuláře (bez POST). V alpha5 přibyla tehdy **dosud nevyzkoušená** dvoukroková ostrá větev; v alpha7 byl tento postup později úspěšně otestován. Je vypnutá, dokud nejsou zapnuté oba přepínače `gas_write_enabled` a `gas_write_confirmed`. Ostrý režim je určen jen pro vědomý, sledovaný test; poté ověřte zapsanou hodnotu v historii innosvěta. Při neočekávané změně formuláře nebo nepotvrzené odpovědi doplněk zápis neopakuje a v deníku `/data/gas_write_journal.json` zachová stav pokusu. Doba plánování se řídí společným polem `schedule`.
+
+
+## Rozšířené finance (alpha8 – testovací)
+
+V nastavení zapněte **Načítat rozšířené finanční údaje** (`finance_extra_enabled`). Při příštím plánovaném čtení nebo startu s `read_on_start=true` se doplněk pokusí získat:
+
+- `BillsGraph` pro obě smlouvy, z něhož počítá bod aktuálního měsíce (tzv. průběžné náklady, které mohou zahrnovat odhad do konce měsíce), referenční náklady podle záloh a odhad ke konci období.
+- `/platby/zalohy` pro každou smlouvu. Každá záloha je samostatný záznam s částkou předpisu, započtenou úhradou, zbývající částkou, splatností a stavem. Příští měsíc nemusí mít stejnou částku.
+
+V Home Assistantu mají vzniknout pro každou energii entity: `dosavadni_naklady_kc`, `predpoklad_podle_zaloh_kc`, `odhad_konec_obdobi_kc`, `mesicni_zaloha_kc`, `budouci_zbyva_kc`, `nejblizsi_zbyva_kc` s prefixem zařízení „innosvět“. Jejich atributy obsahují `body_grafu` a `platebni_kalendar`. Nejde o 365 denních měření, ta nadále zůstávají v Home Assistantu.
+
+**Význam:** částky z grafu jsou odhady/výpočty dodavatele, nikoli konečné faktury. Bod současného měsíce může obsahovat odhad do konce měsíce. Z dat nezjišťujeme spolehlivě jednotkovou cenu 1 m³. Zálohy nijak neměníme ani neplatíme. Historie plateb není samostatně vyúčtováním.
+
+**Pro první test** ponechte skutečný zápis plynu vypnutý, zapněte rozšířené finance a restartujte. Protokol by měl obsahovat „graf nákladů načten“ a „rozpis záloh načten“ u obou energií. Pokud část neprojde, původní bilance zůstane použitelná a starší rozšířené hodnoty se nemají přepisovat. V tomto vydání se doporučená výše zálohy automaticky nevypočítává a není součástí UI; bude navržena až po ověření zaúčtování částečných úhrad a správného vyúčtovacího období.

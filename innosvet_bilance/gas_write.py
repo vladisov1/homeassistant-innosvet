@@ -94,6 +94,87 @@ def validate_and_reserve(journal, slot, reading, now):
     journal_save(journal)
 
 
+def preview_gas_form(opts, today, reading):
+    """Test navigace a vyplnění. Veškeré POST/PUT/PATCH/DELETE na portál blokuje.
+
+    Záměrně NEKLIKÁ na Pokračovat: jde o POST, který může být vedlejší účinek.
+    Nikdy neprovádí žádný zápis ani rezervaci slotu v deníku zápisů.
+    """
+    from app import PROFILE, find_authenticated, try_login
+    PROFILE.mkdir(parents=True, exist_ok=True)
+    LOG.info('Plyn: kontrola formuláře zahájena (bez odesílání)')
+    phase = 'otevření portálu'
+    try:
+        with sync_playwright() as p:
+            context = p.firefox.launch_persistent_context(
+                user_data_dir=str(PROFILE), headless=True,
+                locale='cs-CZ', accept_downloads=False)
+            try:
+                def guard(route):
+                    request = route.request
+                    parsed = urlparse(request.url)
+                    # Autentizační server je jiná doména. Na innosvět
+                    # v tomto režimu nepovolujeme žádný měnící požadavek.
+                    if parsed.hostname == HOST and request.method.upper() not in ('GET', 'HEAD', 'OPTIONS'):
+                        route.abort()
+                    else:
+                        route.continue_()
+                context.route('**/*', guard)
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto(BASE, wait_until='domcontentloaded', timeout=60000)
+                phase = 'přihlášení'
+                active = find_authenticated(context, 35)
+                if active is None:
+                    active = try_login(context, page, opts['innogy_username'], opts['innogy_password'])
+                if active is None:
+                    raise RuntimeError('Přihlášení do innosvěta není dostupné')
+                phase = 'výběr plynové smlouvy'
+                url = BASE + SELECT_PATH + '?contractid=' + opts['gas_contract_id']
+                active.goto(url, wait_until='domcontentloaded', timeout=60000)
+                parsed = urlparse(active.url)
+                if (parsed.hostname != HOST or parsed.path != SELECT_PATH
+                    or parse_qs(parsed.query).get('contractid') != [opts['gas_contract_id']]):
+                    raise RuntimeError('Nesprávná stránka plynové smlouvy')
+                LOG.info('Plyn: stránka plynové smlouvy ověřena')
+                phase = 'otevření formuláře'
+                link = active.get_by_role('link', name=re.compile('Průběžný odečet', re.I))
+                button = active.get_by_role('button', name=re.compile('Průběžný odečet', re.I))
+                if link.count() == 1:
+                    link.click(timeout=20000)
+                elif button.count() == 1:
+                    button.click(timeout=20000)
+                else:
+                    raise RuntimeError('Nelze jednoznačně nalézt volbu průběžného odečtu')
+                active.wait_for_url(lambda u: urlparse(str(u)).path == FORM_PATH, timeout=20000)
+                phase = 'ověření formuláře'
+                form = active.locator('#meterReadingForm')
+                form.wait_for(state='visible', timeout=20000)
+                method_ok = (form.get_attribute('method') or '').lower() == 'post'
+                action_ok = (form.get_attribute('action') or '').split('?')[0] == FORM_PATH
+                gas_ok = (active.get_by_text('Zadejte stav plynoměru', exact=False).count() > 0
+                          and active.get_by_text('Vysoký tarif', exact=False).count() == 0)
+                token_ok = form.locator('input[name="__RequestVerificationToken"]').count() == 1
+                count = form.locator('input[name="CountOff"]')
+                date = form.locator('input[name="Date"]:visible')
+                if not all((method_ok, action_ok, gas_ok, token_ok,
+                            count.count() == 1, date.count() == 1)):
+                    raise RuntimeError('Kontrola plynového formuláře neprošla')
+                if date.input_value().strip() != today:
+                    raise RuntimeError('Datum na formuláři nesouhlasí s dnešním dnem')
+                phase = 'vyplnění formuláře'
+                count.fill(str(reading))
+                if count.input_value() != str(reading):
+                    raise RuntimeError('Formulář nepřijal stav plynoměru')
+                LOG.info('Plyn: formulář otevřen, smlouva a datum ověřeny, stav %s m³ vyplněn; BEZ POST a BEZ odeslání', reading)
+                return 'preview_form_ready'
+            finally:
+                context.close()
+    except Exception as exc:
+        # Nikdy nevypisovat URL, HTML, token, cookies ani text výjimky.
+        LOG.warning('Plyn: kontrolní formulář selhal ve fázi %s (%s); nic neodesláno', phase, type(exc).__name__)
+        raise GasReadError('Příprava formuláře innosvěta selhala ve fázi: ' + phase) from None
+
+
 def write_gas(opts, now, slot):
     """Returns status + value; only performs POST in explicit enabled mode.
 
@@ -108,8 +189,10 @@ def write_gas(opts, now, slot):
     journal = journal_read()
     # Explicit opt-in: a second independent switch prevents accidental enabling.
     if not opts.get('gas_write_confirmed', False):
-        LOG.info('Zápis plynu je připraven (%s m³), ale potvrzovací přepínač je vypnutý; bez odeslání', reading)
-        return 'preview', reading
+        # Na rozdíl od alpha3 skutečně ověříme webový formulář.
+        # V kontrolním režimu nedochází k HTTP POST na innosvět.
+        status = preview_gas_form(opts, today, reading)
+        return status, reading
     validate_and_reserve(journal, slot, reading, now)
     attempts = journal['attempts']
     request_sent = False

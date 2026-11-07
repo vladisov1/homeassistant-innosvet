@@ -1,4 +1,4 @@
-# innosvět – finanční bilance (ALPHA 0.1.0-alpha3)
+# innosvět – finanční bilance (ALPHA 0.1.0-alpha4)
 
 Testovací doplněk pro Home Assistant OS, **výhradně pro čtení** částky předpokládaného přeplatku nebo nedoplatku elektřiny a plynu z innosvěta. Zobrazené bilance pouze přenáší, nepočítá je.
 
@@ -53,15 +53,13 @@ Výchozí časy: `05:55,11:55,17:55,23:55` v `Europe/Prague`. Čtení proběhne 
 
 ## Stav ověření
 
-✅ Čtení obou hodnot, obnova relace a headless běh ověřeny na Windows (test v10c).
-
-⚠️ **Sestavení Docker image, automatické přihlášení na HAOS a doručení MQTT discovery zatím nebyly ověřeny na skutečné instalaci HAOS.** Jde o testovací vydání. Nepovažujte jej za produkční integraci.
+✅ Čtení obou finančních bilancí, přihlášení a MQTT discovery byly následně uživatelsky ověřeny také v HAOS. Nový kontrolní režim webového formuláře alpha4 v HAOS ověřen dosud nebyl.
 
 
 ## Automatický zápis plynoměru – nové experimentální nastavení
 
 - `gas_entity_id`: entita plynoměru v Home Assistantu, např. `sensor.plynomer_celkovy_stav`.
-- `gas_write_enabled`: **výchozí `false`**. `true` aktivuje kontrolu senzoru v plánovaných časech.
+- `gas_write_enabled`: **výchozí `false`**. `true` aktivuje kontrolu senzoru a bezpečné otevření/vyplnění webového formuláře v plánovaných časech.
 - `gas_write_confirmed`: **výchozí `false`**. Teprve při současném `true` obou přepínačů může dojít ke skutečnému odeslání. Neaktivujte bez následného řízeného testu.
 - `schedule`: společné časy čtení finančních bilancí a případného zápisu odečtu, např. `05:55,11:55,17:55,23:55`.
 - `read_on_start`: při startu provede pouze načtení finančních bilancí, **nikoliv** odeslání plynoměru.
@@ -100,4 +98,8 @@ Nejde o EAN, EIC ani číslo měřidla.
 
 ### Oprava alpha3 – senzor HA a bezpečný test
 
-Doplněk potřebuje v manifestu `homeassistant_api: true`, protože čte `sensor.plynomer_celkovy_stav` prostřednictvím `/core/api/states/...`. `gas_write_enabled: true` a `gas_write_confirmed: false` **jen ověří hodnotu senzoru; formulář innosvěta v tomto režimu neotevírá**. Skutečné automatické odesílání do innosvěta zatím není testováno v HAOS, proto druhý přepínač ponechte vypnutý. Názvy a popisy nastavení jsou přeloženy v `translations/cs.yaml`.
+Doplněk potřebuje v manifestu `homeassistant_api: true`, protože čte `sensor.plynomer_celkovy_stav` prostřednictvím `/core/api/states/...`. `gas_write_enabled: true` a `gas_write_confirmed: false` v alpha3 jen ověřily senzor. **V alpha4 navíc otevřou a vyplní formulář plynu bez jediného POST na innosvět**. Skutečné automatické odesílání do innosvěta zatím není testováno v HAOS, proto druhý přepínač ponechte vypnutý. Názvy a popisy nastavení jsou přeloženy v `translations/cs.yaml`.
+
+### Alpha4 – co ověří kontrolní režim
+
+Při naplánovaném čase se otevře správná smlouva, stránka „Průběžný odečet“, zkontroluje se datum a jednotka, vyplní se celá hodnota m³. Úspěšný protokol hlásí `preview_form_ready`. **Na „Pokračovat“ se nekliká**, protože formulář používá POST a není nezávisle ověřeno, že už tento krok nemůže změnit data. Nezobrazí se tedy skutečná rekapitulace. Veškeré měnící HTTP požadavky přímo na innosvět jsou v kontrolním režimu blokované. Pro produkční odesílání ponechte `gas_write_confirmed: false` do samostatného ověření.

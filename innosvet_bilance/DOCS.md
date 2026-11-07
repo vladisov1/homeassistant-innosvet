@@ -121,3 +121,8 @@ V Home Assistantu mají vzniknout pro každou energii entity: `dosavadni_naklady
 **Význam:** částky z grafu jsou odhady/výpočty dodavatele, nikoli konečné faktury. Bod současného měsíce může obsahovat odhad do konce měsíce. Z dat nezjišťujeme spolehlivě jednotkovou cenu 1 m³. Zálohy nijak neměníme ani neplatíme. Historie plateb není samostatně vyúčtováním.
 
 **Pro první test** ponechte skutečný zápis plynu vypnutý, zapněte rozšířené finance a restartujte. Protokol by měl obsahovat „graf nákladů načten“ a „rozpis záloh načten“ u obou energií. Pokud část neprojde, původní bilance zůstane použitelná a starší rozšířené hodnoty se nemají přepisovat. V tomto vydání se doporučená výše zálohy automaticky nevypočítává a není součástí UI; bude navržena až po ověření zaúčtování částečných úhrad a správného vyúčtovacího období.
+
+
+## Oprava alpha9 – diagnostika grafu
+
+Zachytávání grafu začíná při prvním otevření smlouvy. V protokolu se může objevit bezpečný kód `ajax_neprislo`, `ajax_spatny_json`, `ajax_spatne_schema`, `ajax_neplatna_data`, `graf_obdobi_nezjisteno` nebo `graf_aktualni_mesic_nenalezen`. Žádné další změny zápisu plynu se neprovádějí.

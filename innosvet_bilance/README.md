@@ -1,4 +1,4 @@
-# innosvět – finanční údaje a zápis plynu (ALPHA 0.1.0-alpha8)
+# innosvět – finanční údaje a zápis plynu (ALPHA 0.1.0-alpha9)
 
 Home Assistant OS doplněk pro **čtení finančních údajů innogy** a volitelný automatický zápis stavů plynoměru. Stavy plynu se získávají přímo ze senzoru Home Assistantu; elektřina se **nikdy nezapisuje**.
 

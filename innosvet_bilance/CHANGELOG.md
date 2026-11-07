@@ -1,3 +1,11 @@
+## 0.1.0-alpha9 (2026-11-07) – oprava čtení BillsGraph
+
+- Zachytávání `BillsGraph` začíná už před prvním otevřením detailu smlouvy, nikoliv až po načtení bilance.
+- Síťový posluchač si pouze uloží odpověď; JSON zpracuje až následně mimo událost Playwrightu.
+- Bezpečné diagnostické kódy odlišují chybějící AJAX, neplatnou odpověď, schéma a nepřiřaditelné období, bez logování URL, tokenů nebo HTML.
+- Nezměněné načítání záloh, MQTT entity, harmonogram a odesílání plynoměru. Žádná deduplikace stejných odečtů.
+- Dosud neověřeno v běžícím HAOS; nové finanční čtení zůstává volitelné.
+
 ## 0.1.0-alpha8 (2026-11-07) – rozšířené finance, testovací vydání
 
 - Volitelné čtení `BillsGraph` pro plyn a elektřinu (13 bodů vývoje nákladů).

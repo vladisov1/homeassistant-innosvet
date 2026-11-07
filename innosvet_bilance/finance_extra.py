@@ -124,53 +124,73 @@ def _month_shift(year, month, offset):
 
 
 def read_cost_graph(page, contract_id, kind):
-    """Capture the BillsGraph response for the right contract on navigation.
+    """Listen before the FIRST navigation to the contract details page.
 
-    The source is JSON despite content-type text/html. Only numeric series and
-    safe year-month labels are retained, and values are not interpreted as bills.
+    Store response handles inside the event handler and parse only after the
+    handler has returned. Playwright response handlers must not themselves
+    synchronously read the body while the navigation is ongoing.
     """
-    captured = []
+    responses = []
+
     def on_response(response):
-        path = urlparse(response.url)
-        if path.hostname != HOST or path.path != '/innogy24ajax/BillsGraph' or response.status != 200:
-            return
-        try:
-            blob = json.loads(response.text())
-            if isinstance(blob, list) and 10 <= len(blob) <= 18 and all(isinstance(x, dict) for x in blob):
-                captured.append(blob)
-        except (ValueError, TypeError):
-            pass
+        url = urlparse(response.url)
+        if url.hostname == HOST and url.path == '/innogy24ajax/BillsGraph':
+            responses.append(response)
+
     page.on('response', on_response)
     try:
         page.goto(BASE + f'/dashboard/detail-smlouvy-{kind}/naklady-a-spotreba?contractid=' + contract_id,
                   wait_until='domcontentloaded', timeout=60000)
-        if urlparse(page.url).hostname != HOST or '/naklady-a-spotreba' not in urlparse(page.url).path:
-            raise RuntimeError('cost page inaccessible')
-        for _ in range(18):
-            if captured:
+        if (urlparse(page.url).hostname != HOST or
+                '/naklady-a-spotreba' not in urlparse(page.url).path):
+            raise RuntimeError('stranka_nedostupna')
+
+        # AJAX may finish after domcontentloaded. The callback stores only
+        # Response references so reading the body cannot stall callbacks.
+        for _ in range(40):
+            if responses:
                 break
             page.wait_for_timeout(500)
-        if not captured:
-            raise RuntimeError('BillsGraph not captured')
-        data = captured[-1]
-        # Innosvět may use localized labels. Derive month labels from the visible
-        # period heading, never assume an arbitrary list index is current month.
-        visible = page.locator('body').inner_text(timeout=10000)
-        start = _parse_month_start(visible)
+        if not responses:
+            raise RuntimeError('ajax_neprislo')
+
+        data = None
+        malformed = False
+        wrong_shape = False
+        for response in responses:
+            if response.status != 200:
+                continue
+            try:
+                payload = response.json()  # JSON can carry text/html header
+            except Exception:
+                malformed = True
+                continue
+            if (isinstance(payload, list) and len(payload) == 13 and
+                    all(isinstance(x, dict) and
+                        'CurrentPeriodValue' in x and
+                        'PreviousPeriodValue' in x for x in payload)):
+                data = payload
+                break
+            wrong_shape = True
+        if data is None:
+            raise RuntimeError('ajax_spatny_json' if malformed else 'ajax_spatne_schema' if wrong_shape else 'ajax_neprislo')
+
+        start = _parse_month_start(page.locator('body').inner_text(timeout=10000))
         if start is None:
-            raise RuntimeError('cost period start not found')
-        points = []
-        for i, src in enumerate(data):
-            pts = {'mesic': _month_shift(start.year, start.month, i),
-                   'naklady_kc': money(src['CurrentPeriodValue']),
-                   'podle_zaloh_kc': money(src['PreviousPeriodValue'])}
-            points.append(pts)
+            raise RuntimeError('graf_obdobi_nezjisteno')
+        try:
+            points = [
+                {'mesic': _month_shift(start.year, start.month, i),
+                 'naklady_kc': money(src['CurrentPeriodValue']),
+                 'podle_zaloh_kc': money(src['PreviousPeriodValue'])}
+                for i, src in enumerate(data)
+            ]
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError('ajax_neplatna_data') from None
         current = datetime.now(ZoneInfo('Europe/Prague')).strftime('%Y-%m')
         measured = next((x for x in points if x['mesic'] == current), None)
         if measured is None:
-            raise RuntimeError('current month absent from graph')
-        # The point for the currently displayed month can reflect a supplier
-        # estimate to month end; preserve this uncertainty in UI and attributes.
+            raise RuntimeError('graf_aktualni_mesic_nenalezen')
         return {'dosavadni_naklady_kc': measured['naklady_kc'],
                 'predpoklad_podle_zaloh_kc': measured['podle_zaloh_kc'],
                 'odhad_konec_obdobi_kc': points[-1]['naklady_kc'],

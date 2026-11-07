@@ -221,6 +221,16 @@ def try_login(context, page, username, password):
     return None
 
 
+def safe_graph_error(exc):
+    # Pouze vlastní konstantní diagnostika, žádné URL / HTML / tokeny.
+    allowed = {
+        "ajax_neprislo", "ajax_spatny_json", "ajax_spatne_schema",
+        "ajax_neplatna_data", "graf_obdobi_nezjisteno",
+        "graf_aktualni_mesic_nenalezen", "stranka_nedostupna",
+    }
+    return str(exc) if str(exc) in allowed else "jina_chyba"
+
+
 def read_balances(options):
     PROFILE.mkdir(parents=True, exist_ok=True)
     pages = {
@@ -258,7 +268,21 @@ def read_balances(options):
             if active is None:
                 raise RuntimeError("Přihlášení není dostupné; automatický login nebyl ověřen")
             for kind, link in pages.items():
-                active.goto(link, wait_until="domcontentloaded", timeout=60000)
+                # Zachytávání BillsGraph musí začít PŘED prvním otevřením stránky.
+                # V alpha8 se posluchač spustil až při druhém goto stejné URL,
+                # kdy AJAX grafu už nemusel být znovu vyžádán.
+                extra = {}
+                if options.get("finance_extra_enabled", False):
+                    from finance_extra import read_cost_graph, read_payments
+                    cid = options["gas_contract_id"] if kind == "plyn" else options["electricity_contract_id"]
+                    try:
+                        extra["naklady"] = read_cost_graph(active, cid, kind)
+                        LOG.info("%s: graf nákladů načten (13 bodů)", kind.capitalize())
+                    except Exception as exc:
+                        LOG.warning("%s: graf nákladů nenalezen (%s: %s); předchozí hodnoty zachovány",
+                                    kind.capitalize(), type(exc).__name__, safe_graph_error(exc))
+                else:
+                    active.goto(link, wait_until="domcontentloaded", timeout=60000)
                 if urlparse(active.url).hostname != HOST or "/naklady-a-spotreba" not in urlparse(active.url).path:
                     raise RuntimeError("Smlouva není dostupná: " + kind)
                 active.get_by_text(re.compile(r"Předpokládaný\s+(přeplatek|nedoplatek)", re.I)).first.wait_for(timeout=20000)
@@ -271,14 +295,6 @@ def read_balances(options):
                 signed = amount if read["typ"] == "přeplatek" else -amount
                 results[kind] = {"typ": read["typ"], "castka_kc": float(amount), "bilance_kc": float(signed)}
                 if options.get("finance_extra_enabled", False):
-                    from finance_extra import read_cost_graph, read_payments
-                    cid = options["gas_contract_id"] if kind == "plyn" else options["electricity_contract_id"]
-                    extra = {}
-                    try:
-                        extra["naklady"] = read_cost_graph(active, cid, kind)
-                        LOG.info("%s: graf nákladů načten", kind.capitalize())
-                    except Exception as exc:
-                        LOG.warning("%s: graf nákladů nenalezen (%s); předchozí hodnoty zachovány", kind.capitalize(), type(exc).__name__)
                     try:
                         extra["zalohy"] = read_payments(active, cid)
                         LOG.info("%s: rozpis záloh načten", kind.capitalize())
@@ -341,7 +357,7 @@ def main():
     try:
         client = mqtt_connection()
         publish_discovery(client)
-        LOG.info("Spuštěno innosvět 0.1.0-alpha8; časy: %s; automatický zápis plynu: %s",
+        LOG.info("Spuštěno innosvět 0.1.0-alpha9; časy: %s; automatický zápis plynu: %s",
                  ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
         if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
             LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")

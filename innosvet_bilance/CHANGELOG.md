@@ -1,3 +1,11 @@
+## 0.1.0-alpha7 (2026-11-07) – diagnostika kliknutí a bezpečný klávesový fallback
+
+- Po alpha6, kde tlačítko Pokračovat bylo viditelné/aktivní, ale Playwright kliknutí skončilo TimeoutError bez POST.
+- Přidána kontrola zásahu středu tlačítka a přítomnosti překryvného prvku (bez citlivých dat v logu).
+- Pokud kliknutí skončí TimeoutError a nebyl zachycen žádný POST, znovu se ověří nezměněný formulář a provede se **jedno** stisknutí Enter na témže tlačítku.
+- Přísná síťová brána nadále povoluje nejvýše jeden POST v každém ze dvou kroků. Při nejistotě se zápis neobnovuje.
+- Obě akce finálního potvrzení jsou v HAOS nadále experimentální; první ostrý běh vyžaduje sledování a kontrolu historie.
+
 # Changelog
 
 ## 0.1.0-alpha6 (2026-11-07) – diagnostika prvního potvrzení

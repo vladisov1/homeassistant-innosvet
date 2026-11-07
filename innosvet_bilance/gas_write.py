@@ -14,7 +14,7 @@ from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 LOG = logging.getLogger('innosvet.gas')
 HOST = 'innosvet.innogy.cz'
@@ -298,11 +298,38 @@ def write_gas(opts, now, slot):
                          diagnostic['first_button_enabled'])
                 if command.count() != 1 or not diagnostic['first_button_visible'] or not diagnostic['first_button_enabled']:
                     raise RuntimeError('První potvrzovací tlačítko není jednoznačné nebo aktivní')
+                # Kontrola překryvu / cíle kliknutí. Zaznamenáváme pouze názvy
+                # značek a třídy prvků, nikdy text formuláře ani citlivá data.
+                hit = command.evaluate("""el => {
+                  const b = el.getBoundingClientRect();
+                  const n = document.elementFromPoint(b.left+b.width/2, b.top+b.height/2);
+                  return {hit: !!n && (n === el || el.contains(n)),
+                          tag: n ? n.tagName.toLowerCase() : 'none',
+                          overlay: !!document.querySelector('.js-overlay--body:not([hidden])') &&
+                            getComputedStyle(document.querySelector('.js-overlay--body:not([hidden])')).display !== 'none'};
+                }""")
+                LOG.info('Plyn: Pokračovat – cíl kliknutí: %s, překryv na stránce: %s',
+                         hit['hit'], hit['overlay'])
+                # Playwright čeká na kliknutelnost. Pokud kliknutí skončí
+                # timeoutem dřív, než byl zachycen POST, lze jako jednu
+                # alternativní aktivaci použít Enter na stejném tlačítku.
                 LOG.info('Plyn: Pokračovat – pokus o kliknutí')
-                # Do not wait for navigation as part of click(): the portal may
-                # update the DOM asynchronously. Inspect request and resulting page separately.
-                command.click(timeout=15000, no_wait_after=True)
-                LOG.info('Plyn: Pokračovat – kliknutí vráceno, zaznamenaný POST: %s', post_gate['counts']['continue'])
+                try:
+                    command.click(timeout=8000, no_wait_after=True)
+                except PlaywrightTimeout:
+                    if post_gate['counts']['continue'] != 0:
+                        raise RuntimeError('Kliknutí je nejisté a POST již začal') from None
+                    # Při ztrátě formuláře či jeho změně nezkoušíme nic znovu.
+                    if (form.count() != 1 or command.count() != 1
+                        or not command.is_visible() or not command.is_enabled()
+                        or count.input_value() != str(reading)
+                        or date.input_value().strip() != today):
+                        raise RuntimeError('Formulář se po timeoutu změnil') from None
+                    LOG.warning('Plyn: běžné kliknutí se neprovedlo; bez POST, zkouším Enter na stejném tlačítku')
+                    command.focus(timeout=5000)
+                    # Alternativní JEDNORÁZOVÉ odeslání formuláře stiskem Enter.
+                    command.press('Enter', timeout=8000, no_wait_after=True)
+                LOG.info('Plyn: Pokračovat – aktivace dokončena, zaznamenaný POST: %s', post_gate['counts']['continue'])
                 phase = 'odpověď prvního kroku'
                 # Both network response and new confirmation page may arrive later.
                 for _ in range(40):

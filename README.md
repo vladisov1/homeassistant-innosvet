@@ -1,6 +1,6 @@
 # innogy innosvět – doplněk pro Home Assistant OS
 
-**Verze 0.1.0-alpha6 – čtení bilancí, ověřený kontrolní režim plynoměru a experimentální dvoukrokový ostrý zápis (dosud neověřený v HAOS).**
+**Verze 0.1.0-alpha7 – čtení bilancí, ověřený kontrolní režim plynoměru a experimentální dvoukrokový ostrý zápis (dosud neověřený v HAOS).**
 
 **Nově potvrzené nastavení:** přihlašovací jméno a heslo se zadávají jednou v **Konfiguraci** nainstalovaného doplňku (pole `innogy_username` / `innogy_password`); při aktualizaci se nepřepisují do Pythonu. Způsob přihlášení po vypršení relace je stále experimentální.
 

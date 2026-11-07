@@ -2,7 +2,7 @@
 
 Testovací doplněk pro Home Assistant OS, **výhradně pro čtení** částky předpokládaného přeplatku nebo nedoplatku elektřiny a plynu z innosvěta. Zobrazené bilance pouze přenáší, nepočítá je.
 
-**ZÁPIS PLYNOMĚRU NENÍ V TÉTO VERZI IMPLEMENTOVÁN.** Není zde tlačítko, příkaz ani plánovač pro odeslání odečtu. Všechny nečtecí požadavky na `innosvet.innogy.cz` se blokují.
+**ZÁPIS PLYNOMĚRU JE NOVĚ POUZE EXPERIMENTÁLNÍ A VE VÝCHOZÍM STAVU VYPNUTÝ.** Ve čtecím režimu se blokují všechny nečtecí požadavky na `innosvet.innogy.cz`. Odeslání vyžaduje dva explicitní přepínače a zatím nebylo ověřeno v HAOS.
 
 ## Požadavky
 
@@ -56,3 +56,43 @@ Výchozí časy: `05:55,11:55,17:55,23:55` v `Europe/Prague`. Čtení proběhne 
 ✅ Čtení obou hodnot, obnova relace a headless běh ověřeny na Windows (test v10c).
 
 ⚠️ **Sestavení Docker image, automatické přihlášení na HAOS a doručení MQTT discovery zatím nebyly ověřeny na skutečné instalaci HAOS.** Jde o testovací vydání. Nepovažujte jej za produkční integraci.
+
+
+## Automatický zápis plynoměru – nové experimentální nastavení
+
+- `gas_entity_id`: entita plynoměru v Home Assistantu, např. `sensor.plynomer_celkovy_stav`.
+- `gas_write_enabled`: **výchozí `false`**. `true` aktivuje kontrolu senzoru v plánovaných časech.
+- `gas_write_confirmed`: **výchozí `false`**. Teprve při současném `true` obou přepínačů může dojít ke skutečnému odeslání. Neaktivujte bez následného řízeného testu.
+- `schedule`: společné časy čtení finančních bilancí a případného zápisu odečtu, např. `05:55,11:55,17:55,23:55`.
+- `read_on_start`: při startu provede pouze načtení finančních bilancí, **nikoliv** odeslání plynoměru.
+
+Před odesláním aplikace kontroluje existenci senzoru, číselný stav, jednotku
+`m³`, neklesající odečet vůči poslednímu úspěšnému zápisu v aplikaci, datum
+v otevřeném formuláři a jednoznačně rozpoznanou plynovou smlouvu. Číslo
+odesílá v celých m³ odříznutím desetinných míst. Formulář nejprve otevře
+stránku „Zadat průběžný odečet“, zkontroluje datum a hodnotu na stránce
+„Shrnutí před odesláním“ a teprve poté použije „Odeslat odečet“.
+
+Po potvrzení „Odečet byl odeslán“ uloží výsledek. Před pokusem ukládá do
+`/data/gas_write_journal.json` záznam termínu; pokud program skončí před
+jednoznačným potvrzením, **tentýž termín znovu automaticky neodešle**.
+Nepřepisujte ani nemažte tento deník, pokud potřebujete zachovat ochranu
+před duplicitou. Denní stejné hodnoty jsou povolené.
+
+Důležité: přijetí dvoustupňového zápisu bylo ověřeno ručně v prohlížeči,
+**nebylo ověřeno automatické potvrzení obou kroků skriptem ani ostrý provoz
+v HAOS**. V první fázi použijte `gas_write_enabled: true` a
+`gas_write_confirmed: false` a prohlédněte si protokol. Vstup do ostrého
+režimu vyžaduje vědomé zapnutí druhého přepínače. Chybný údaj může ovlivnit
+zobrazenou historii a finanční bilanci v innosvětě.
+
+## Jak zjistit ID smlouvy
+
+V innosvětě otevřete požadovanou smlouvu → **Náklady a spotřeba** a v
+adresním řádku najděte parametr `contractid`. Příklady s **fiktivními** ID:
+
+- Plyn: `https://innosvet.innogy.cz/dashboard/detail-smlouvy-plyn/naklady-a-spotreba?contractid=1234567890`
+- Elektřina: `https://innosvet.innogy.cz/dashboard/detail-smlouvy-elektrina/naklady-a-spotreba?contractid=9876543210`
+
+Číslo za `contractid=` se vkládá do `gas_contract_id` či `electricity_contract_id`.
+Nejde o EAN, EIC ani číslo měřidla.

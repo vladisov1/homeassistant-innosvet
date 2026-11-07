@@ -11,4 +11,5 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 RUN python -m pip install --no-cache-dir playwright==1.56.0 paho-mqtt==2.1.0
 COPY app.py /app/app.py
+COPY gas_write.py /app/gas_write.py
 CMD ["python", "/app/app.py"]

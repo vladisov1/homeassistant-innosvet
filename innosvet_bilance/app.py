@@ -1,8 +1,7 @@
-"""Experimental innosvět read-only HAOS app.
+"""innosvět HAOS alpha: financial balances and opt-in gas submission.
 
-No gas meter submissions exist in this app. All non-read requests to the
-innosvět host are blocked; authentication requests on the identity provider
-may use POST. Never log credentials, URLs with query parameters or cookies.
+Default is READ ONLY. Never log credentials, URLs with query parameters, cookies
+or request bodies. Gas writing requires TWO explicit opt-in switches.
 """
 import json
 import logging
@@ -70,6 +69,11 @@ def load_options():
     if not times or len(set(times)) != len(times) or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in times):
         raise ValueError("schedule musí obsahovat unikátní časy HH:MM oddělené čárkami")
     opts["times"] = sorted(times)
+    opts["gas_write_enabled"] = bool(opts.get("gas_write_enabled", False))
+    opts["gas_write_confirmed"] = bool(opts.get("gas_write_confirmed", False))
+    opts["gas_entity_id"] = str(opts.get("gas_entity_id", "sensor.plynomer_celkovy_stav")).strip()
+    if not re.fullmatch(r"sensor\.[a-z0-9_]+", opts["gas_entity_id"]):
+        raise ValueError("gas_entity_id musí být platná entita sensor.*")
     return opts
 
 
@@ -123,6 +127,13 @@ def publish_discovery(client):
         "availability_topic": STATE_PREFIX + "/availability",
         "device": device,
         "icon": "mdi:cloud-check",
+    }, ensure_ascii=False))
+    mqtt_publish(client, "homeassistant/sensor/innosvet_gas_write_status/config", json.dumps({
+        "name": "innosvět – odeslání plynu", "unique_id": "innosvet_gas_write_status_v1",
+        "state_topic": STATE_PREFIX + "/gas_write_status",
+        "json_attributes_topic": STATE_PREFIX + "/gas_write_attributes",
+        "availability_topic": STATE_PREFIX + "/availability",
+        "device": device, "icon": "mdi:gas-cylinder",
     }, ensure_ascii=False))
     mqtt_publish(client, STATE_PREFIX + "/availability", "online")
 
@@ -271,7 +282,12 @@ def main():
     try:
         client = mqtt_connection()
         publish_discovery(client)
-        LOG.info("Spuštěno pouze ČTENÍ, časy: %s", ", ".join(options["times"]))
+        LOG.info("Spuštěno innosvět 0.1.0-alpha; časy: %s; automatický zápis plynu: %s",
+                 ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
+        if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
+            LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")
+        mqtt_publish(client, STATE_PREFIX + "/gas_write_status",
+                     "vypnuto" if not options["gas_write_enabled"] else "kontrola" if not options["gas_write_confirmed"] else "připraveno")
         last_day_slot = None
         first_run = True
         while not STOP:
@@ -292,6 +308,21 @@ def main():
                     # Do not print URLs, cookies, exception details or credentials.
                     LOG.warning("Čtení selhalo: %s; starší hodnoty zůstávají zachované", type(exc).__name__)
                     mqtt_publish(client, STATE_PREFIX + "/last_read_status", "chyba")
+            # Write is due only at scheduled times, never merely because HAOS rebooted.
+            # Read and write failures must not affect one another.
+            if due and options["gas_write_enabled"]:
+                from gas_write import write_gas
+                try:
+                    status, reading = write_gas(options, now, slot[0] + "T" + slot[1])
+                    mqtt_publish(client, STATE_PREFIX + "/gas_write_status", status)
+                    mqtt_publish(client, STATE_PREFIX + "/gas_write_attributes", json.dumps({
+                        "last_attempt": datetime.now(tz).isoformat(timespec="seconds"),
+                        "reading_m3": reading, "slot": slot[0] + " " + slot[1],
+                    }, ensure_ascii=False))
+                    LOG.info("Plyn: výsledek plánovaného běhu: %s", status)
+                except Exception as exc:
+                    LOG.warning("Plyn: zápis nepotvrzen (%s), bez automatického opakování", type(exc).__name__)
+                    mqtt_publish(client, STATE_PREFIX + "/gas_write_status", "chyba")
             first_run = False
             for _ in range(20):
                 if STOP:

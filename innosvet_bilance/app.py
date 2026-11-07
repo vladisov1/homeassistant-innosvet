@@ -226,7 +226,7 @@ def safe_graph_error(exc):
     allowed = {
         "ajax_neprislo", "ajax_spatny_json", "ajax_spatne_schema",
         "ajax_neplatna_data", "graf_obdobi_nezjisteno",
-        "graf_aktualni_mesic_nenalezen", "stranka_nedostupna",
+        "graf_aktualni_mesic_nenalezen", "graf_obdobi_nejednoznacne", "stranka_nedostupna",
     }
     return str(exc) if str(exc) in allowed else "jina_chyba"
 
@@ -277,7 +277,9 @@ def read_balances(options):
                     cid = options["gas_contract_id"] if kind == "plyn" else options["electricity_contract_id"]
                     try:
                         extra["naklady"] = read_cost_graph(active, cid, kind)
-                        LOG.info("%s: graf nákladů načten (13 bodů)", kind.capitalize())
+                        LOG.info("%s: graf nákladů načten (13 bodů, období %s, zdroj %s)",
+                                 kind.capitalize(), extra["naklady"]["graf_zacatek"],
+                                 extra["naklady"]["graf_obdobi_zdroj"])
                     except Exception as exc:
                         LOG.warning("%s: graf nákladů nenalezen (%s: %s); předchozí hodnoty zachovány",
                                     kind.capitalize(), type(exc).__name__, safe_graph_error(exc))
@@ -357,7 +359,7 @@ def main():
     try:
         client = mqtt_connection()
         publish_discovery(client)
-        LOG.info("Spuštěno innosvět 0.1.0-alpha9; časy: %s; automatický zápis plynu: %s",
+        LOG.info("Spuštěno innosvět 0.1.0-alpha10; časy: %s; automatický zápis plynu: %s",
                  ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
         if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
             LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")

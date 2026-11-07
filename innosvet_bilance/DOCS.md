@@ -126,3 +126,8 @@ V Home Assistantu mají vzniknout pro každou energii entity: `dosavadni_naklady
 ## Oprava alpha9 – diagnostika grafu
 
 Zachytávání grafu začíná při prvním otevření smlouvy. V protokolu se může objevit bezpečný kód `ajax_neprislo`, `ajax_spatny_json`, `ajax_spatne_schema`, `ajax_neplatna_data`, `graf_obdobi_nezjisteno` nebo `graf_aktualni_mesic_nenalezen`. Žádné další změny zápisu plynu se neprovádějí.
+
+
+## Alpha10 – ověřování období grafu
+
+JSON `BillsGraph` je mapován na kalendářní měsíce přednostně přes jeho vlastní datumová pole. Pokud toto mapování nelze bezpečně potvrdit, doplněk ponechá starší hodnoty a vypíše `graf_obdobi_nezjisteno` nebo `graf_obdobi_nejednoznacne`. Ověřte správný měsíc a částky podle portálu innosvět.

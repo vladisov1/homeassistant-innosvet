@@ -118,6 +118,89 @@ def _parse_month_start(visible):
         return None
 
 
+
+MONTH_NAMES = {
+    'leden': 1, 'ledna': 1, 'unor': 2, 'unora': 2, 'brezen': 3, 'brezna': 3,
+    'duben': 4, 'dubna': 4, 'kveten': 5, 'kvetna': 5, 'cerven': 6, 'cervna': 6,
+    'cervenec': 7, 'cervence': 7, 'srpen': 8, 'srpna': 8, 'zari': 9, 'rijen': 10,
+    'rijna': 10, 'listopad': 11, 'listopadu': 11, 'prosinec': 12, 'prosince': 12,
+}
+
+
+def _normalize_month_name(value):
+    import unicodedata
+    return ''.join(c for c in unicodedata.normalize('NFD', str(value).lower())
+                   if unicodedata.category(c) != 'Mn')
+
+
+def _parse_month_field(value, year_hint=None):
+    """Parse month/year labels only, never guess from numeric amounts."""
+    if value is None or isinstance(value, bool):
+        return None
+    raw = str(value).strip()
+    if not raw or len(raw) > 100:
+        return None
+    # Exact year-month, YYYY-MM-DD, DD.MM.YYYY, MM/YYYY, and JS/ISO stamps.
+    m = re.search(r'(?<!\d)(20\d{2})[-/.]([01]?\d)(?:[-/.]([0-3]?\d))?(?!\d)', raw)
+    if m:
+        y, mo = int(m[1]), int(m[2])
+        if 1 <= mo <= 12:
+            return date(y, mo, 1)
+    m = re.search(r'(?<!\d)([0-3]?\d)\.\s*([01]?\d)\.\s*(20\d{2})(?!\d)', raw)
+    if m and 1 <= int(m[2]) <= 12:
+        return date(int(m[3]), int(m[2]), 1)
+    m = re.search(r'(?<!\d)([01]?\d)[/. -](20\d{2})(?!\d)', raw)
+    if m and 1 <= int(m[1]) <= 12:
+        return date(int(m[2]), int(m[1]), 1)
+    y = None
+    try:
+        if year_hint is not None and re.fullmatch(r'20\d{2}', str(year_hint).strip()):
+            y = int(str(year_hint).strip())
+    except (TypeError, ValueError):
+        pass
+    if y is not None:
+        if re.fullmatch(r'0?[1-9]|1[0-2]', raw):
+            return date(y, int(raw), 1)
+        for month_name, month in MONTH_NAMES.items():
+            if month_name in _normalize_month_name(raw):
+                return date(y, month, 1)
+    return None
+
+
+def _resolve_cost_graph_start(payload, page):
+    """Prefer AJAX record dates over visible body text; require 13 consecutive months."""
+    # Try each record's own month. One well-formed dated record is enough
+    # only if every other parseable dated record agrees with the sequence.
+    candidates = []
+    for i, record in enumerate(payload):
+        hint = record.get('Year')
+        parsed = None
+        for field in ('Date', 'Period'):
+            parsed = _parse_month_field(record.get(field), hint)
+            if parsed is not None:
+                break
+        if parsed is not None:
+            start_month_index = parsed.year * 12 + parsed.month - 1 - i
+            candidates.append(start_month_index)
+    if candidates and len(set(candidates)) == 1:
+        idx = candidates[0]
+        return date(idx // 12, idx % 12 + 1, 1), 'json'
+    if candidates and len(set(candidates)) > 1:
+        raise RuntimeError('graf_obdobi_nejednoznacne')
+
+    # Visual period labels might be in SVG / embedded HTML, not body.innerText.
+    for extractor in (
+        lambda: page.locator('body').inner_text(timeout=10000),
+        lambda: page.content(),
+    ):
+        try:
+            result = _parse_month_start(extractor())
+            if result is not None:
+                return result, 'page'
+        except Exception:
+            pass
+    raise RuntimeError('graf_obdobi_nezjisteno')
+
 def _month_shift(year, month, offset):
     x = year * 12 + month - 1 + offset
     return f'{x // 12:04d}-{x % 12 + 1:02d}'
@@ -175,9 +258,7 @@ def read_cost_graph(page, contract_id, kind):
         if data is None:
             raise RuntimeError('ajax_spatny_json' if malformed else 'ajax_spatne_schema' if wrong_shape else 'ajax_neprislo')
 
-        start = _parse_month_start(page.locator('body').inner_text(timeout=10000))
-        if start is None:
-            raise RuntimeError('graf_obdobi_nezjisteno')
+        start, period_source = _resolve_cost_graph_start(data, page)
         try:
             points = [
                 {'mesic': _month_shift(start.year, start.month, i),
@@ -195,6 +276,7 @@ def read_cost_graph(page, contract_id, kind):
                 'predpoklad_podle_zaloh_kc': measured['podle_zaloh_kc'],
                 'odhad_konec_obdobi_kc': points[-1]['naklady_kc'],
                 'body_grafu': points, 'graf_zacatek': start.isoformat(),
+                'graf_obdobi_zdroj': period_source,
                 'mesic_zobrazenych_nakladu': current,
                 'poznamka': 'Průběžná kalkulace innogy; bod aktuálního měsíce může obsahovat odhad.'}
     finally:

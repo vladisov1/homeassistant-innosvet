@@ -1,4 +1,4 @@
-# innogy innosvět – Home Assistant OS (0.1.0-alpha9)
+# innogy innosvět – Home Assistant OS (0.1.0-alpha10)
 
 Aktuální alfa doplněk rozšiřuje funkční bilanci obou smluv a dříve otestovaný automatický zápis plynoměru o **volitelné čtení nákladů a záloh**. Podrobnosti v [DOCS](innosvet_bilance/DOCS.md) a [CHANGELOG](innosvet_bilance/CHANGELOG.md).
 

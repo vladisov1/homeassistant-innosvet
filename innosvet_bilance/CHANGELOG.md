@@ -1,3 +1,13 @@
+## 0.1.0-alpha10 (2026-11-07) – rozpoznání období BillsGraph
+
+- Po úspěšném zachycení JSON nákladů se období určuje přednostně z `Date`, `Year` a `Period` jednotlivých položek.
+- Při různých formátech kalendářního data se používají přísná pravidla, nikoliv odhad podle aktuálního měsíce.
+- Pokud datová pole nejsou použitelné, zkouší se datum z textu a HTML stránky.
+- Pokud nelze období jednoznačně určit, nové náklady se nepublikují a existující hodnoty zůstávají zachované.
+- V protokolu je bezpečný zdroj rozpoznaného období, bez čísla smlouvy, přihlašovacích údajů a raw JSON.
+- Automatické odesílání plynoměru, načítání bilancí a rozpis záloh beze změn.
+- Oprava otestována syntakticky a unit-testy; ověření na skutečném HAOS stále čeká.
+
 ## 0.1.0-alpha9 (2026-11-07) – oprava čtení BillsGraph
 
 - Zachytávání `BillsGraph` začíná už před prvním otevřením detailu smlouvy, nikoliv až po načtení bilance.

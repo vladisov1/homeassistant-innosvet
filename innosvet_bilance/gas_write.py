@@ -197,6 +197,10 @@ def write_gas(opts, now, slot):
     attempts = journal['attempts']
     request_sent = False
     phase = 'zahájení zápisu'
+    diagnostic = {'first_button_count': -1, 'first_button_visible': False,
+                  'first_button_enabled': False, 'first_post_count': 0,
+                  'final_post_count': 0, 'response_statuses': [],
+                  'summary_heading': False, 'summary_button': False}
     try:
         with sync_playwright() as p:
             from app import PROFILE, find_authenticated, try_login
@@ -212,6 +216,7 @@ def write_gas(opts, now, slot):
                     parsed = urlparse(req.url)
                     if parsed.hostname == HOST and parsed.path == FORM_PATH and req.method.upper() == 'POST':
                         post_gate['http_statuses'].append(response.status)
+                        diagnostic['response_statuses'] = list(post_gate['http_statuses'])
                 context.on('response', observe_response)
                 def guard(route):
                     request = route.request
@@ -222,6 +227,10 @@ def write_gas(opts, now, slot):
                         if (method == 'POST' and parsed.path == FORM_PATH
                             and stage in ('continue', 'final') and post_gate['counts'][stage] == 0):
                             post_gate['counts'][stage] += 1
+                            diagnostic['first_post_count'] = post_gate['counts']['continue']
+                            diagnostic['final_post_count'] = post_gate['counts']['final']
+                            # Close gate at the FIRST permitted request, not after a page transition.
+                            post_gate['phase'] = 'blocked'
                             route.continue_()
                         else:
                             route.abort()
@@ -277,29 +286,66 @@ def write_gas(opts, now, slot):
                 request_sent = True
                 attempts[slot]['status'] = 'first_step_uncertain'
                 journal_save(journal)
-                form.locator('button[name="command"][value="CountOffFormSendButton"]').click(timeout=20000)
-                active.get_by_text('Shrnutí před odesláním', exact=False).wait_for(timeout=20000)
+                # The portal may render an <input type=submit> rather than <button>.
+                # Count and check the precise command field BEFORE interacting.
+                command = form.locator('[name="command"][value="CountOffFormSendButton"]')
+                diagnostic['first_button_count'] = command.count()
+                if command.count() == 1:
+                    diagnostic['first_button_visible'] = command.is_visible()
+                    diagnostic['first_button_enabled'] = command.is_enabled()
+                LOG.info('Plyn: Pokračovat – počet prvků %s, viditelné: %s, aktivní: %s',
+                         diagnostic['first_button_count'], diagnostic['first_button_visible'],
+                         diagnostic['first_button_enabled'])
+                if command.count() != 1 or not diagnostic['first_button_visible'] or not diagnostic['first_button_enabled']:
+                    raise RuntimeError('První potvrzovací tlačítko není jednoznačné nebo aktivní')
+                LOG.info('Plyn: Pokračovat – pokus o kliknutí')
+                # Do not wait for navigation as part of click(): the portal may
+                # update the DOM asynchronously. Inspect request and resulting page separately.
+                command.click(timeout=15000, no_wait_after=True)
+                LOG.info('Plyn: Pokračovat – kliknutí vráceno, zaznamenaný POST: %s', post_gate['counts']['continue'])
+                phase = 'odpověď prvního kroku'
+                # Both network response and new confirmation page may arrive later.
+                for _ in range(40):
+                    if post_gate['http_statuses'] or post_gate['counts']['continue'] == 0:
+                        # Wait longer for a possible POST (async validation) without resending.
+                        if post_gate['http_statuses']:
+                            break
+                    active.wait_for_timeout(500)
+                LOG.info('Plyn: Pokračovat – POST počet %s, HTTP stavy %s',
+                         post_gate['counts']['continue'], post_gate['http_statuses'])
                 if post_gate['counts']['continue'] != 1:
-                    raise RuntimeError('První potvrzovací POST nebyl jednoznačný')
-                if not post_gate['http_statuses'] or not (200 <= post_gate['http_statuses'][0] < 400):
-                    raise RuntimeError('První POST nemá úspěšnou HTTP odpověď')
-                post_gate['phase'] = 'blocked'
+                    raise RuntimeError('Po kliknutí nebyl zachycen právě jeden POST')
+                if len(post_gate['http_statuses']) != 1 or not (200 <= post_gate['http_statuses'][0] < 400):
+                    raise RuntimeError('První POST nemá potvrzenou úspěšnou HTTP odpověď')
                 phase = 'ověření rekapitulace'
-                summary = active.locator('body').inner_text(timeout=15000)
-                pattern = r'Nový\s+stav\s*:\s*' + re.escape(str(reading)) + r'\s*m[³3]'
-                if not re.search(pattern, summary, re.I):
-                    raise RuntimeError('Shrnutí neobsahuje očekávaný nový stav')
-                if not re.search(r'Odečet\s+ke\s+dni\s*' + re.escape(today), summary, re.I):
-                    raise RuntimeError('Shrnutí neobsahuje správné datum')
+                # Wait for the summary, but do not depend on one hard-coded title.
                 send = active.get_by_role('button', name=re.compile(r'^Odeslat odečet$', re.I))
-                if send.count() != 1:
-                    raise RuntimeError('Nelze jednoznačně najít finální potvrzení')
+                for _ in range(30):
+                    if send.count() == 1:
+                        break
+                    active.wait_for_timeout(500)
+                diagnostic['summary_heading'] = active.get_by_text('Shrnutí před odesláním', exact=False).count() > 0
+                diagnostic['summary_button'] = send.count() == 1
+                LOG.info('Plyn: rekapitulace – očekávaný nadpis: %s, finální tlačítko: %s',
+                         diagnostic['summary_heading'], diagnostic['summary_button'])
+                if send.count() != 1 or not send.is_visible() or not send.is_enabled():
+                    raise RuntimeError('Není jednoznačně dostupná rekapitulace s finálním potvrzením')
+                summary = active.locator('body').inner_text(timeout=15000)
+                # The presentation may use spaces as thousands separators.
+                condensed = re.sub(r'[\s\u00a0\u202f]', '', summary)
+                reading_ok = str(reading) in condensed
+                date_ok = today in summary or today in condensed
+                # Require BOTH data points and the final confirmation button.
+                LOG.info('Plyn: rekapitulace – stav souhlasí: %s, datum souhlasí: %s', reading_ok, date_ok)
+                if not (reading_ok and date_ok):
+                    raise RuntimeError('Rekapitulace neobsahuje jednoznačný stav a datum')
                 LOG.info('Plyn: rekapitulace ověřena; povoleno finální potvrzení')
                 phase = 'finální odeslání'
                 attempts[slot]['status'] = 'final_step_uncertain'
                 journal_save(journal)
                 post_gate['phase'] = 'final'
-                send.click(timeout=20000)
+                LOG.info('Plyn: finální odeslání – zahajuji kliknutí')
+                send.click(timeout=20000, no_wait_after=True)
                 # Guard blocks any additional POST; accept only a portal confirmation.
                 active.get_by_text('Odečet byl odeslán', exact=False).wait_for(timeout=25000)
                 if post_gate['counts']['final'] != 1:
@@ -319,5 +365,10 @@ def write_gas(opts, now, slot):
         attempts[slot]['error_type'] = type(exc).__name__
         attempts[slot]['phase'] = phase
         journal_save(journal)
+        LOG.warning('Plyn: diagnostika: tlačítko počet=%s, viditelné=%s, aktivní=%s; první POST=%s, finální POST=%s, HTTP=%s; nadpis rekapitulace=%s, finální tlačítko=%s',
+                    diagnostic['first_button_count'], diagnostic['first_button_visible'],
+                    diagnostic['first_button_enabled'], diagnostic['first_post_count'],
+                    diagnostic['final_post_count'], diagnostic['response_statuses'],
+                    diagnostic['summary_heading'], diagnostic['summary_button'])
         LOG.warning('Plyn: odeslání nepotvrzeno ve fázi %s (%s), bez opakování; zkontrolujte historii innosvěta', phase, type(exc).__name__)
         raise RuntimeError('Zápis nepotvrzen; bez automatického opakování') from None

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha6 (2026-11-07) – diagnostika prvního potvrzení
+
+- Oprava a podrobnější bezpečná diagnostika prvního kroku „Pokračovat“ po TimeoutError v alpha5.
+- Rozlišeno vyhledání a kliknutí na tlačítko, počet POST požadavků, HTTP odpověď a přítomnost rekapitulace.
+- POST brána se zavírá ihned po prvním povoleném požadavku.
+- Ponechán kontrolní režim bez odeslání i blokování automatického opakování. Ostrá větev nadále neověřená.
+
 ## 0.1.0-alpha5 (2026-11-07) – řízená dvoukroková větev zápisu
 
 - Zachován ověřený kontrolní režim alpha4: otevření a vyplnění formuláře bez POST.

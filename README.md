@@ -1,6 +1,6 @@
 # innogy innosvět – doplněk pro Home Assistant OS
 
-**Verze 0.1.0-alpha4 – čtení finančních bilancí, kontrolní režim plynoměru; ostré odesílání neověřeno.**
+**Verze 0.1.0-alpha5 – čtení bilancí, ověřený kontrolní režim plynoměru a experimentální dvoukrokový ostrý zápis (dosud neověřený v HAOS).**
 
 **Nově potvrzené nastavení:** přihlašovací jméno a heslo se zadávají jednou v **Konfiguraci** nainstalovaného doplňku (pole `innogy_username` / `innogy_password`); při aktualizaci se nepřepisují do Pythonu. Způsob přihlášení po vypršení relace je stále experimentální.
 
@@ -56,3 +56,9 @@ Podrobnosti jsou v `innosvet_bilance/DOCS.md`.
 ## Oprava alpha3
 
 Doplněno oprávnění `homeassistant_api: true` pro čtení senzoru HA přes Supervisor a české popisky nastavení. Pokud bylo v protokolu `HTTPError`, nový protokol upřesní HTTP stav. Pro bezpečný test zapněte pouze `gas_write_enabled` a ponechte `gas_write_confirmed: false`. To platilo pro alpha3. **V alpha4** testovací režim navíc otevře a vyplní formulář, nikoli však rekapitulaci vyžadující POST.
+
+## Co je nového v alpha5
+
+Při `gas_write_enabled: true` a `gas_write_confirmed: false` zůstává bezpečný náhled formuláře bez POST, stejně jako ve fyzicky otestované alpha4. Při zapnutí obou přepínačů se teprve spustí **ostrý pokus**, který zahrnuje první i finální potvrzení. Každá nejednoznačná situace znamená zastavení a žádné automatické opakování daného plánovaného termínu. Protože finální dvoukrokový postup alpha5 dosud nebyl fyzicky ověřen v HAOS, nechte `gas_write_confirmed` vypnutý až do vědomého řízeného testu. Protokol nikdy nezaznamenává hesla ani přihlašovací tokeny.
+
+Při chybě po prvním potvrzovacím kroku zkontrolujte historii odečtů přímo v innosvětě; označení `uncertain` v deníku neznamená, že zápis neproběhl.

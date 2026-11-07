@@ -196,19 +196,32 @@ def write_gas(opts, now, slot):
     validate_and_reserve(journal, slot, reading, now)
     attempts = journal['attempts']
     request_sent = False
+    phase = 'zahájení zápisu'
     try:
         with sync_playwright() as p:
             from app import PROFILE, find_authenticated, try_login
             context = p.firefox.launch_persistent_context(
                 user_data_dir=str(PROFILE), headless=True, locale='cs-CZ', accept_downloads=False)
             try:
-                allow_post = {'value': False}
+                # We only authorize the specific form POST, one request per stage.
+                # Everything else that could change portal state is blocked.
+                post_gate = {'phase': 'blocked', 'counts': {'continue': 0, 'final': 0},
+                             'http_statuses': []}
+                def observe_response(response):
+                    req = response.request
+                    parsed = urlparse(req.url)
+                    if parsed.hostname == HOST and parsed.path == FORM_PATH and req.method.upper() == 'POST':
+                        post_gate['http_statuses'].append(response.status)
+                context.on('response', observe_response)
                 def guard(route):
                     request = route.request
                     parsed = urlparse(request.url)
                     method = request.method.upper()
                     if parsed.hostname == HOST and method not in ('GET', 'HEAD', 'OPTIONS'):
-                        if method == 'POST' and parsed.path == FORM_PATH and allow_post['value']:
+                        stage = post_gate['phase']
+                        if (method == 'POST' and parsed.path == FORM_PATH
+                            and stage in ('continue', 'final') and post_gate['counts'][stage] == 0):
+                            post_gate['counts'][stage] += 1
                             route.continue_()
                         else:
                             route.abort()
@@ -216,18 +229,21 @@ def write_gas(opts, now, slot):
                         route.continue_()
                 context.route('**/*', guard)
                 page = context.pages[0] if context.pages else context.new_page()
+                phase = 'přihlášení do portálu'
                 page.goto(BASE, wait_until='domcontentloaded', timeout=60000)
                 active = find_authenticated(context, 35)
                 if active is None:
                     active = try_login(context, page, opts['innogy_username'], opts['innogy_password'])
                 if active is None:
                     raise RuntimeError('Přihlášení se nezdařilo')
+                phase = 'výběr plynové smlouvy'
                 target = BASE + SELECT_PATH + '?contractid=' + opts['gas_contract_id']
                 active.goto(target, wait_until='domcontentloaded', timeout=60000)
                 parsed_select = urlparse(active.url)
                 if (parsed_select.path != SELECT_PATH or parsed_select.hostname != HOST
                     or parse_qs(parsed_select.query).get('contractid') != [opts['gas_contract_id']]):
                     raise RuntimeError('Nesprávná stránka plynové smlouvy')
+                phase = 'otevření formuláře'
                 link = active.get_by_role('link', name=re.compile('Průběžný odečet', re.I))
                 button = active.get_by_role('button', name=re.compile('Průběžný odečet', re.I))
                 if link.count() == 1:
@@ -237,6 +253,7 @@ def write_gas(opts, now, slot):
                 else:
                     raise RuntimeError('Nejednoznačná volba průběžného odečtu')
                 active.wait_for_url(lambda u: urlparse(str(u)).path == FORM_PATH, timeout=20000)
+                phase = 'ověření formuláře a hodnoty'
                 form = active.locator('#meterReadingForm')
                 form.wait_for(state='visible', timeout=20000)
                 if ((form.get_attribute('method') or '').lower() != 'post'
@@ -252,13 +269,23 @@ def write_gas(opts, now, slot):
                 count.fill(str(reading))
                 if count.input_value() != str(reading):
                     raise RuntimeError('Stav nelze spolehlivě vyplnit')
-                # No write allowed above this line.
-                allow_post['value'] = True
-                request_sent = True  # conservatively treat all subsequent failures as uncertain
+                # Before this point: NO POST. From here every permitted POST is
+                # treated as a potentially irreversible remote action.
+                LOG.info('Plyn: ověřena smlouva, datum a hodnota %s m³; zahajuji dvoukrokové potvrzení', reading)
+                phase = 'první krok Pokračovat'
+                post_gate['phase'] = 'continue'
+                request_sent = True
+                attempts[slot]['status'] = 'first_step_uncertain'
+                journal_save(journal)
                 form.locator('button[name="command"][value="CountOffFormSendButton"]').click(timeout=20000)
                 active.get_by_text('Shrnutí před odesláním', exact=False).wait_for(timeout=20000)
+                if post_gate['counts']['continue'] != 1:
+                    raise RuntimeError('První potvrzovací POST nebyl jednoznačný')
+                if not post_gate['http_statuses'] or not (200 <= post_gate['http_statuses'][0] < 400):
+                    raise RuntimeError('První POST nemá úspěšnou HTTP odpověď')
+                post_gate['phase'] = 'blocked'
+                phase = 'ověření rekapitulace'
                 summary = active.locator('body').inner_text(timeout=15000)
-                # Confirm a distinct 'Nový stav' line, not merely previous reading.
                 pattern = r'Nový\s+stav\s*:\s*' + re.escape(str(reading)) + r'\s*m[³3]'
                 if not re.search(pattern, summary, re.I):
                     raise RuntimeError('Shrnutí neobsahuje očekávaný nový stav')
@@ -267,16 +294,30 @@ def write_gas(opts, now, slot):
                 send = active.get_by_role('button', name=re.compile(r'^Odeslat odečet$', re.I))
                 if send.count() != 1:
                     raise RuntimeError('Nelze jednoznačně najít finální potvrzení')
+                LOG.info('Plyn: rekapitulace ověřena; povoleno finální potvrzení')
+                phase = 'finální odeslání'
+                attempts[slot]['status'] = 'final_step_uncertain'
+                journal_save(journal)
+                post_gate['phase'] = 'final'
                 send.click(timeout=20000)
+                # Guard blocks any additional POST; accept only a portal confirmation.
                 active.get_by_text('Odečet byl odeslán', exact=False).wait_for(timeout=25000)
+                if post_gate['counts']['final'] != 1:
+                    raise RuntimeError('Finální POST nebyl jednoznačný')
+                if len(post_gate['http_statuses']) != 2 or not (200 <= post_gate['http_statuses'][1] < 400):
+                    raise RuntimeError('Finální POST nemá úspěšnou HTTP odpověď')
+                post_gate['phase'] = 'blocked'
                 attempts[slot]['status'] = 'success'
                 journal['last_success'] = {'reading': reading, 'at': datetime.now(now.tzinfo).isoformat()}
                 journal_save(journal)
+                LOG.info('Plyn: odečet %s m³ potvrzen stránkou innosvěta', reading)
                 return 'success', reading
             finally:
                 context.close()
     except Exception as exc:
         attempts[slot]['status'] = 'uncertain' if request_sent else 'not_sent'
         attempts[slot]['error_type'] = type(exc).__name__
+        attempts[slot]['phase'] = phase
         journal_save(journal)
+        LOG.warning('Plyn: odeslání nepotvrzeno ve fázi %s (%s), bez opakování; zkontrolujte historii innosvěta', phase, type(exc).__name__)
         raise RuntimeError('Zápis nepotvrzen; bez automatického opakování') from None

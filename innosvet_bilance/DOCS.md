@@ -1,4 +1,4 @@
-# innosvět – finanční bilance (ALPHA 0.1.0-alpha4)
+# innosvět – finanční bilance (ALPHA 0.1.0-alpha5)
 
 Testovací doplněk pro Home Assistant OS, **výhradně pro čtení** částky předpokládaného přeplatku nebo nedoplatku elektřiny a plynu z innosvěta. Zobrazené bilance pouze přenáší, nepočítá je.
 
@@ -103,3 +103,7 @@ Doplněk potřebuje v manifestu `homeassistant_api: true`, protože čte `sensor
 ### Alpha4 – co ověří kontrolní režim
 
 Při naplánovaném čase se otevře správná smlouva, stránka „Průběžný odečet“, zkontroluje se datum a jednotka, vyplní se celá hodnota m³. Úspěšný protokol hlásí `preview_form_ready`. **Na „Pokračovat“ se nekliká**, protože formulář používá POST a není nezávisle ověřeno, že už tento krok nemůže změnit data. Nezobrazí se tedy skutečná rekapitulace. Veškeré měnící HTTP požadavky přímo na innosvět jsou v kontrolním režimu blokované. Pro produkční odesílání ponechte `gas_write_confirmed: false` do samostatného ověření.
+
+## Poznámka k alpha5 (experimentální ostrý zápis)
+
+Ověřeno uživatelem: kontrolní režim alpha4 prošel až k vyplnění formuláře (bez POST). V alpha5 přibyla **dosud nevyzkoušená** dvoukroková ostrá větev. Je vypnutá, dokud nejsou zapnuté oba přepínače `gas_write_enabled` a `gas_write_confirmed`. Ostrý režim je určen jen pro vědomý, sledovaný test; poté ověřte zapsanou hodnotu v historii innosvěta. Při neočekávané změně formuláře nebo nepotvrzené odpovědi doplněk zápis neopakuje a v deníku `/data/gas_write_journal.json` zachová stav pokusu. Doba plánování se řídí společným polem `schedule`.

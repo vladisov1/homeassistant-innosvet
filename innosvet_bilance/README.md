@@ -1,4 +1,4 @@
-# innosvět – finanční bilance (ALPHA 0.1.0-alpha4)
+# innosvět – finanční bilance (ALPHA 0.1.0-alpha5)
 
 Testovací doplněk Home Assistant OS pro čtení předpokládané bilance plynu a elektřiny z portálu innosvět. Publikuje údaje přes MQTT discovery.
 

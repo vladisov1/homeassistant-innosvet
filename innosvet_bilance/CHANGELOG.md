@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha5 (2026-11-07) – řízená dvoukroková větev zápisu
+
+- Zachován ověřený kontrolní režim alpha4: otevření a vyplnění formuláře bez POST.
+- V ostrém režimu po dvou výslovných souhlasech proběhne kontrola formuláře, „Pokračovat“, kontrola rekapitulace a „Odeslat odečet“.
+- Každý potvrzovací krok smí povolit pouze jeden POST na ověřenou cestu formuláře; ostatní nečtecí požadavky na innosvět se blokují.
+- Pro oba POST se vyžaduje úspěšná HTTP odpověď a po finálním kroku textové potvrzení portálu. Pokud se portál změnil, výsledek se označí za nejistý.
+- Deník na disku brání automatickému opakování stejného plánovaného termínu po chybě nebo restartu.
+- **Automatické odeslání nebylo ověřeno end-to-end v HAOS.** Odeslání zůstává výchozím nastavením vypnuté, první ostrý test musí být dozorovaný.
+
 ## 0.1.0-alpha4 (2026-11-07) – bezpečný test formuláře plynu
 
 - Kontrolní režim (`gas_write_enabled: true`, `gas_write_confirmed: false`) nyní kromě čtení senzoru skutečně otevře innosvět, vybere plynovou smlouvu, prověří pole data a stavu a vyplní odečet.
@@ -9,7 +18,7 @@
 - Ostrý automatický zápis nadále nebyl ověřen v HAOS a má zůstat vypnutý.
 
 
-## 0.1.0-alpha4 (2026-11-07) – oprava testu zápisu
+## 0.1.0-alpha3 (2026-11-07) – oprava testu zápisu
 
 - **Opraveno oprávnění k senzorům HA:** `homeassistant_api: true` v `config.yaml`. Předchozí varianta nedovolovala přístup přes `/core/api/states/` a mohla končit `HTTPError`.
 - Při chybě načtení senzoru se nově zapisuje bezpečná diagnostika HTTP 401/403/404 bez tokenů či citlivých odpovědí.

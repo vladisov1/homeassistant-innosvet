@@ -1,6 +1,6 @@
 # innogy innosvět – doplněk pro Home Assistant OS
 
-**Verze 0.1.0-alpha3 – čtení finančních bilancí, kontrolní režim plynoměru; ostré odesílání neověřeno.**
+**Verze 0.1.0-alpha4 – čtení finančních bilancí, kontrolní režim plynoměru; ostré odesílání neověřeno.**
 
 **Nově potvrzené nastavení:** přihlašovací jméno a heslo se zadávají jednou v **Konfiguraci** nainstalovaného doplňku (pole `innogy_username` / `innogy_password`); při aktualizaci se nepřepisují do Pythonu. Způsob přihlášení po vypršení relace je stále experimentální.
 
@@ -14,9 +14,9 @@ Tento repozitář lze přidat jako **vlastní repozitář aplikací/doplňků** 
 
 ## Co doplněk dělá
 
-Čte **předpokládaný přeplatek / nedoplatek** plynu a elektřiny z innosvěta čtyřikrát denně (`05:55`, `11:55`, `17:55`, `23:55`) a publikuje dvě číselné entity pomocí MQTT discovery. **Nečte stav elektroměru z VisionQ, nepočítá náklady a nijak neodesílá odečty.**
+Čte **předpokládaný přeplatek / nedoplatek** plynu a elektřiny z innosvěta čtyřikrát denně (`05:55`, `11:55`, `17:55`, `23:55`) a publikuje dvě číselné entity pomocí MQTT discovery. **Nečte stav elektroměru z VisionQ a nepočítá náklady. Odeslání plynu je samostatná, výslovně povolovaná experimentální funkce.**
 
-**Experimentální zápis plynoměru je přítomen, ale není v HAOS ověřen. Kontrolní režim neodesílá odečty.** Načítání finančních údajů bylo ověřeno na Windows s uloženou relací Playwright; **instalace v HAOS, nové automatické přihlášení heslem a MQTT zatím nejsou ověřené**.
+**Experimentální zápis plynoměru je přítomen, ale není v HAOS ověřen. Kontrolní režim neodesílá odečty.** Načítání finančních údajů bylo ověřeno na Windows s uloženou relací Playwright; **instalace v HAOS, automatické přihlášení a MQTT již byly uživatelsky ověřeny pro finanční bilance**.
 
 ## Instalace z GitHubu
 
@@ -36,8 +36,8 @@ Tento repozitář lze přidat jako **vlastní repozitář aplikací/doplňků** 
 
 V této aktualizaci je nově přidána **volitelná funkce odeslání** z entity
 `sensor.plynomer_celkovy_stav`. Výchozí konfigurace `gas_write_enabled: false`
-znamená, že **se nic neodesílá**. Po zapnutí prvního přepínače lze pouze ověřovat
-hodnotu senzoru; odeslání vyžaduje ještě nezávislé výslovné zapnutí
+znamená, že **se nic neodesílá**. Po zapnutí prvního přepínače se ověří
+hodnota senzoru, otevře a vyplní formulář plynu bez jakéhokoli POST na portál; odeslání vyžaduje ještě nezávislé výslovné zapnutí
 `gas_write_confirmed: true`.
 
 Časy se zadávají společným polem `schedule`, například
@@ -55,4 +55,4 @@ Podrobnosti jsou v `innosvet_bilance/DOCS.md`.
 
 ## Oprava alpha3
 
-Doplněno oprávnění `homeassistant_api: true` pro čtení senzoru HA přes Supervisor a české popisky nastavení. Pokud bylo v protokolu `HTTPError`, nový protokol upřesní HTTP stav. Pro bezpečný test zapněte pouze `gas_write_enabled` a ponechte `gas_write_confirmed: false`. Testovací režim prozatím čte a ověřuje hodnotu senzoru, **neprochází formulářem portálu**.
+Doplněno oprávnění `homeassistant_api: true` pro čtení senzoru HA přes Supervisor a české popisky nastavení. Pokud bylo v protokolu `HTTPError`, nový protokol upřesní HTTP stav. Pro bezpečný test zapněte pouze `gas_write_enabled` a ponechte `gas_write_confirmed: false`. To platilo pro alpha3. **V alpha4** testovací režim navíc otevře a vyplní formulář, nikoli však rekapitulaci vyžadující POST.

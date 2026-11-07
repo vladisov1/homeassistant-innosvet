@@ -1,0 +1,14 @@
+# Never commit secrets or sessions
+.env
+.env.*
+*.session.json
+*storage_state*.json
+*cookie*.json
+browser_profile/
+firefox_profile/
+options.json
+bilance.json
+last_read.json
+__pycache__/
+*.pyc
+.DS_Store

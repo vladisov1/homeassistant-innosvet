@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 from playwright.sync_api import sync_playwright
 
@@ -23,6 +24,11 @@ SELECT_PATH = '/chci-zaridit/zadat-odecet'
 JOURNAL = Path('/data/gas_write_journal.json')
 
 
+class GasReadError(RuntimeError):
+    """Safe, non-secret diagnostic for accessing the HA state API."""
+
+
+
 def get_reading(entity_id):
     if not re.fullmatch(r'sensor\.[a-z0-9_]+', entity_id or ''):
         raise ValueError('Neplatná entita senzoru plynoměru')
@@ -31,8 +37,19 @@ def get_reading(entity_id):
         raise RuntimeError('Chybí přístup k Home Assistant API')
     req = Request('http://supervisor/core/api/states/' + entity_id,
                   headers={'Authorization': 'Bearer ' + token})
-    with urlopen(req, timeout=15) as response:
-        data = json.load(response)
+    try:
+        with urlopen(req, timeout=15) as response:
+            data = json.load(response)
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            raise GasReadError(f'HTTP {exc.code}: Home Assistant odmítl přístup k entitě; ověřte homeassistant_api: true') from None
+        if exc.code == 404:
+            raise GasReadError('HTTP 404: zadaná entita plynoměru nebyla nalezena') from None
+        raise GasReadError(f'HTTP {exc.code}: Home Assistant nevrátil stav plynoměru') from None
+    except (URLError, TimeoutError):
+        raise GasReadError('Nepodařilo se spojit s Home Assistant API') from None
+    except (ValueError, TypeError):
+        raise GasReadError('Home Assistant vrátil neplatnou odpověď senzoru') from None
     state = str(data.get('state', '')).strip().replace(',', '.')
     if state.lower() in ('unavailable', 'unknown', 'none', ''):
         raise ValueError('Senzor neposkytuje platný odečet')

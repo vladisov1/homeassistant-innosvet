@@ -282,7 +282,7 @@ def main():
     try:
         client = mqtt_connection()
         publish_discovery(client)
-        LOG.info("Spuštěno innosvět 0.1.0-alpha; časy: %s; automatický zápis plynu: %s",
+        LOG.info("Spuštěno innosvět 0.1.0-alpha3; časy: %s; automatický zápis plynu: %s",
                  ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
         if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
             LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")
@@ -321,7 +321,11 @@ def main():
                     }, ensure_ascii=False))
                     LOG.info("Plyn: výsledek plánovaného běhu: %s", status)
                 except Exception as exc:
-                    LOG.warning("Plyn: zápis nepotvrzen (%s), bez automatického opakování", type(exc).__name__)
+                    from gas_write import GasReadError
+                    if isinstance(exc, GasReadError):
+                        LOG.warning("Plyn: kontrola senzoru selhala: %s; odesílání se nespustilo", exc)
+                    else:
+                        LOG.warning("Plyn: zápis nepotvrzen (%s), bez automatického opakování", type(exc).__name__)
                     mqtt_publish(client, STATE_PREFIX + "/gas_write_status", "chyba")
             first_run = False
             for _ in range(20):

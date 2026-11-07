@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha3 (2026-11-07) – oprava testu zápisu
+
+- **Opraveno oprávnění k senzorům HA:** `homeassistant_api: true` v `config.yaml`. Předchozí varianta nedovolovala přístup přes `/core/api/states/` a mohla končit `HTTPError`.
+- Při chybě načtení senzoru se nově zapisuje bezpečná diagnostika HTTP 401/403/404 bez tokenů či citlivých odpovědí.
+- České názvy a stručné vysvětlivky všech konfiguračních položek přes `translations/cs.yaml`. Technické názvy zůstávají zachovány.
+- **Kontrolní režim ověřuje dostupnost a hodnotu senzoru**, nikoli vyplnění formuláře innosvěta. Před skutečným odesláním je třeba samostatný test navigace a potvrzení.
+- Skutečný automatický zápis plynu **není dosud ověřen v HAOS** a má zůstat zakázán (`gas_write_confirmed: false`).
+
+# Changelog
+
 ## 0.1.0-alpha (2026-11-06)
 
 - Zachována testovací větev 0.1.0-alpha (bez navyšování verze).

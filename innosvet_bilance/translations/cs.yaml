@@ -1,0 +1,31 @@
+configuration:
+  innogy_username:
+    name: "Přihlašovací jméno innogy"
+    description: "Uživatelské jméno pro přístup do innosvěta. Zadává se pouze při prvním nastavení nebo při změně účtu."
+  innogy_password:
+    name: "Heslo do innosvěta"
+    description: "Heslo k účtu innogy. Uchovávejte pouze v nastavení doplňku."
+  gas_contract_id:
+    name: "Číslo smlouvy – plyn"
+    description: "Identifikátor contractid z adresy detailu plynové smlouvy v innosvětě."
+  electricity_contract_id:
+    name: "Číslo smlouvy – elektřina"
+    description: "Identifikátor contractid z adresy detailu elektrické smlouvy v innosvětě."
+  gas_entity_id:
+    name: "Senzor stavu plynoměru"
+    description: "Entita v Home Assistantu s celkovým stavem plynoměru v m³, například sensor.plynomer_celkovy_stav."
+  gas_write_enabled:
+    name: "Aktivovat kontrolu zápisu plynu"
+    description: "Při plánovaném spuštění načte a zkontroluje stav plynoměru. Bez druhého povolení nic neodesílá."
+  gas_write_confirmed:
+    name: "Povolit skutečné odesílání plynu"
+    description: "Společně s aktivovanou kontrolou povolí skutečný zápis do innosvěta. Nezapínejte před dokončením testů."
+  read_on_start:
+    name: "Načíst údaje při spuštění"
+    description: "Po spuštění doplňku ihned načte finanční bilance. Odečet plynoměru se mimo plánovaný čas neodesílá."
+  schedule:
+    name: "Časy automatického spouštění"
+    description: "Časy ve formátu HH:MM oddělené čárkou, například 05:55,11:55,17:55,23:55. Platí pro čtení i povolený zápis."
+  timezone:
+    name: "Časové pásmo"
+    description: "Časové pásmo harmonogramu, pro Česko ponechte Europe/Prague."

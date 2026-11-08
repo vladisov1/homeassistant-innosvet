@@ -1,3 +1,11 @@
+## 0.1.0-alpha11 (2026-11-08) – bezpečný fallback finálního potvrzení plynu
+
+- Zachována ověřená finanční část alpha10 i stávající MQTT entity, nastavení a harmonogram.
+- Finální tlačítko „Odeslat odečet“ po TimeoutError nyní připouští jednorázové stisknutí Enter, **jen když nebyl zachycen finální POST**, rekapitulace stále obsahuje správný stav a datum a tlačítko zůstává jednoznačné, viditelné a aktivní.
+- Při zaznamenaném či opožděném POST, změně stránky nebo nejednoznačném výsledku se nic znovu neaktivuje. Síťová brána nadále propustí maximálně jeden finální POST; nezdařený slot se automaticky neopakuje.
+- Žádné změny ve frekvenci zápisů: schválený optimalizovaný režim první/změna/poslední bude samostatná aktualizace až po ověření stability potvrzování.
+- Ověřena syntaxe, pravidla změny kódu a balení; **ostrý test v HAOS dosud neproběhl**.
+
 ## 0.1.0-alpha10 (2026-11-07) – rozpoznání období BillsGraph
 
 - Po úspěšném zachycení JSON nákladů se období určuje přednostně z `Date`, `Year` a `Period` jednotlivých položek.

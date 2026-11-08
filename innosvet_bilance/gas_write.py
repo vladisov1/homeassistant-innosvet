@@ -371,8 +371,31 @@ def write_gas(opts, now, slot):
                 attempts[slot]['status'] = 'final_step_uncertain'
                 journal_save(journal)
                 post_gate['phase'] = 'final'
+                # In Firefox the final button can be visible and enabled while the
+                # pointer click does not reach it. One keyboard activation is allowed
+                # ONLY if the click timed out, NO final POST was observed and the
+                # same verified summary is still on screen. Never retry an uncertain
+                # submission or a click that returned normally.
                 LOG.info('Plyn: finální odeslání – zahajuji kliknutí')
-                send.click(timeout=20000, no_wait_after=True)
+                try:
+                    send.click(timeout=8000, no_wait_after=True)
+                except PlaywrightTimeout:
+                    if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
+                        raise RuntimeError('Finální kliknutí je nejisté; POST již začal') from None
+                    # Allow queued network events to be observed before deciding.
+                    active.wait_for_timeout(1000)
+                    if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
+                        raise RuntimeError('Finální kliknutí je nejisté; opožděný POST') from None
+                    if (send.count() != 1 or not send.is_visible() or not send.is_enabled()
+                        or active.get_by_text('Shrnutí před odesláním', exact=False).count() == 0):
+                        raise RuntimeError('Rekapitulace se po timeoutu změnila') from None
+                    summary_after = active.locator('body').inner_text(timeout=10000)
+                    condensed_after = re.sub(r'[\s\u00a0\u202f]', '', summary_after)
+                    if str(reading) not in condensed_after or (today not in summary_after and today not in condensed_after):
+                        raise RuntimeError('Údaje rekapitulace se po timeoutu změnily') from None
+                    LOG.warning('Plyn: finální kliknutí bez POST; rekapitulace ověřena, zkouším jediné Enter')
+                    send.focus(timeout=5000)
+                    send.press('Enter', timeout=8000, no_wait_after=True)
                 # Guard blocks any additional POST; accept only a portal confirmation.
                 active.get_by_text('Odečet byl odeslán', exact=False).wait_for(timeout=25000)
                 if post_gate['counts']['final'] != 1:

@@ -1,3 +1,13 @@
+## 0.1.0-alpha12 (2026-11-08) – diagnostika a bezpečná aktivace finálního potvrzení
+
+- Před odesláním se kontroluje skutečný cíl kliknutí finálního tlačítka. Pokud myš nemůže zasáhnout tlačítko, použije se **jako první a jediná akce Enter**, místo čekání na timeout kliknutí.
+- Pokud cíl kliknutí odpovídá tlačítku, použije se standardní kliknutí. Fallback po timeoutu zůstává přísně hlídaný; po normálně dokončeném kliknutí se **nikdy neopakuje**.
+- Bezpečná diagnostika zaznamenává způsob aktivace, blokovací HTTP stavy 401/403/429 a počet JavaScriptových chyb; nikdy URL s parametry, obsah stránky, tokeny či cookies.
+- Základní rozpoznání CAPTCHA/security challenge vyvolá bezpečné ukončení bez pokusu o její obcházení.
+- Zůstává maximálně jeden finální POST; nejednoznačné výsledky se automaticky neopakují. Finance, harmonogram, MQTT a čtení záloh jsou beze změny.
+- Optimalizace četnosti plynových odečtů není součástí této opravné verze.
+- Kontrola syntaxe a statické testy proběhly; ostré ověření v HAOS je nutné.
+
 ## 0.1.0-alpha11 (2026-11-08) – bezpečný fallback finálního potvrzení plynu
 
 - Zachována ověřená finanční část alpha10 i stávající MQTT entity, nastavení a harmonogram.

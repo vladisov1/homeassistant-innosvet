@@ -200,7 +200,9 @@ def write_gas(opts, now, slot):
     diagnostic = {'first_button_count': -1, 'first_button_visible': False,
                   'first_button_enabled': False, 'first_post_count': 0,
                   'final_post_count': 0, 'response_statuses': [],
-                  'summary_heading': False, 'summary_button': False}
+                  'summary_heading': False, 'summary_button': False,
+                  'final_hit': None, 'final_activated_by': 'none',
+                  'portal_block_statuses': [], 'js_error_count': 0}
     try:
         with sync_playwright() as p:
             from app import PROFILE, find_authenticated, try_login
@@ -214,6 +216,9 @@ def write_gas(opts, now, slot):
                 def observe_response(response):
                     req = response.request
                     parsed = urlparse(req.url)
+                    # Only HTTP status codes; never store URLs, headers, bodies or cookies.
+                    if parsed.hostname == HOST and response.status in (401, 403, 429):
+                        diagnostic['portal_block_statuses'].append(response.status)
                     if parsed.hostname == HOST and parsed.path == FORM_PATH and req.method.upper() == 'POST':
                         post_gate['http_statuses'].append(response.status)
                         diagnostic['response_statuses'] = list(post_gate['http_statuses'])
@@ -237,7 +242,13 @@ def write_gas(opts, now, slot):
                     else:
                         route.continue_()
                 context.route('**/*', guard)
+                def note_page_error(_error):
+                    # Error strings may contain private URLs and tokens: count only.
+                    diagnostic['js_error_count'] += 1
+                context.on('page', lambda new_page: new_page.on('pageerror', note_page_error))
                 page = context.pages[0] if context.pages else context.new_page()
+                for existing_page in context.pages:
+                    existing_page.on('pageerror', note_page_error)
                 phase = 'přihlášení do portálu'
                 page.goto(BASE, wait_until='domcontentloaded', timeout=60000)
                 active = find_authenticated(context, 35)
@@ -371,31 +382,62 @@ def write_gas(opts, now, slot):
                 attempts[slot]['status'] = 'final_step_uncertain'
                 journal_save(journal)
                 post_gate['phase'] = 'final'
-                # In Firefox the final button can be visible and enabled while the
-                # pointer click does not reach it. One keyboard activation is allowed
-                # ONLY if the click timed out, NO final POST was observed and the
-                # same verified summary is still on screen. Never retry an uncertain
-                # submission or a click that returned normally.
-                LOG.info('Plyn: finální odeslání – zahajuji kliknutí')
-                try:
-                    send.click(timeout=8000, no_wait_after=True)
-                except PlaywrightTimeout:
-                    if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
-                        raise RuntimeError('Finální kliknutí je nejisté; POST již začal') from None
-                    # Allow queued network events to be observed before deciding.
-                    active.wait_for_timeout(1000)
-                    if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
-                        raise RuntimeError('Finální kliknutí je nejisté; opožděný POST') from None
-                    if (send.count() != 1 or not send.is_visible() or not send.is_enabled()
-                        or active.get_by_text('Shrnutí před odesláním', exact=False).count() == 0):
-                        raise RuntimeError('Rekapitulace se po timeoutu změnila') from None
-                    summary_after = active.locator('body').inner_text(timeout=10000)
-                    condensed_after = re.sub(r'[\s\u00a0\u202f]', '', summary_after)
-                    if str(reading) not in condensed_after or (today not in summary_after and today not in condensed_after):
-                        raise RuntimeError('Údaje rekapitulace se po timeoutu změnily') from None
-                    LOG.warning('Plyn: finální kliknutí bez POST; rekapitulace ověřena, zkouším jediné Enter')
+                # The mouse hit-test is performed BEFORE any irreversible attempt.
+                # If another element occupies the button centre, keyboard activation
+                # is chosen as the FIRST AND ONLY activation. No click is attempted.
+                # This is not an anti-bot bypass; if a security challenge or HTTP
+                # block is present, fail closed and require manual inspection.
+                final_hit = send.evaluate("""el => {
+                    const b = el.getBoundingClientRect();
+                    const at = document.elementFromPoint(b.left+b.width/2, b.top+b.height/2);
+                    const blocker = document.querySelector('iframe[src*="captcha"], iframe[src*="challenge"], .g-recaptcha, .h-captcha, [data-sitekey]');
+                    return {hit: !!at && (at === el || el.contains(at)),
+                            challenge: !!blocker, width: b.width, height: b.height};
+                }""")
+                diagnostic['final_hit'] = bool(final_hit['hit'])
+                LOG.info('Plyn: finální tlačítko – cíl kliknutí: %s, bezpečnostní výzva: %s',
+                         diagnostic['final_hit'], bool(final_hit['challenge']))
+                if final_hit['challenge'] or diagnostic['portal_block_statuses']:
+                    raise RuntimeError('Potenciální bezpečnostní kontrola portálu; bez odeslání')
+                if final_hit['width'] <= 0 or final_hit['height'] <= 0:
+                    raise RuntimeError('Finální tlačítko nemá platné rozměry')
+                LOG.info('Plyn: finální odeslání – zahajuji jedinou aktivaci')
+                if not diagnostic['final_hit']:
+                    # No pointer interaction took place. Enter is the primary action.
+                    diagnostic['final_activated_by'] = 'keyboard_primary'
                     send.focus(timeout=5000)
                     send.press('Enter', timeout=8000, no_wait_after=True)
+                else:
+                    diagnostic['final_activated_by'] = 'pointer_primary'
+                    try:
+                        send.click(timeout=8000, no_wait_after=True)
+                    except PlaywrightTimeout:
+                        # A timeout does not prove that a request was not sent.
+                        # Preserve alpha11's guarded, single fallback, but never
+                        # reactivate after a normal click or an ambiguous result.
+                        if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
+                            raise RuntimeError('Finální kliknutí nejisté; POST začal') from None
+                        active.wait_for_timeout(1500)
+                        if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
+                            raise RuntimeError('Finální kliknutí nejisté; opožděný POST') from None
+                        if (send.count() != 1 or not send.is_visible() or not send.is_enabled()
+                            or active.get_by_text('Shrnutí před odesláním', exact=False).count() == 0):
+                            raise RuntimeError('Rekapitulace po timeoutu změněna') from None
+                        summary_after = active.locator('body').inner_text(timeout=10000)
+                        condensed_after = re.sub(r'[\s\u00a0\u202f]', '', summary_after)
+                        if (str(reading) not in condensed_after or
+                            (today not in summary_after and today not in condensed_after)):
+                            raise RuntimeError('Stav či datum rekapitulace se změnily') from None
+                        if diagnostic['portal_block_statuses']:
+                            raise RuntimeError('Portál vrátil bezpečnostní HTTP stav') from None
+                        # Check again: if the click did not trigger a request but
+                        # could have changed the page, do not send twice.
+                        diagnostic['final_activated_by'] = 'keyboard_after_pointer_timeout'
+                        LOG.warning('Plyn: finální kliknutí timeout bez POST; ověřeno, jediné Enter')
+                        send.focus(timeout=5000)
+                        send.press('Enter', timeout=8000, no_wait_after=True)
+                LOG.info('Plyn: finální aktivace=%s; počet zachycených POST=%s',
+                         diagnostic['final_activated_by'], post_gate['counts']['final'])
                 # Guard blocks any additional POST; accept only a portal confirmation.
                 active.get_by_text('Odečet byl odeslán', exact=False).wait_for(timeout=25000)
                 if post_gate['counts']['final'] != 1:
@@ -420,5 +462,8 @@ def write_gas(opts, now, slot):
                     diagnostic['first_button_enabled'], diagnostic['first_post_count'],
                     diagnostic['final_post_count'], diagnostic['response_statuses'],
                     diagnostic['summary_heading'], diagnostic['summary_button'])
+        LOG.warning('Plyn: diagnostika finále: hit=%s, aktivace=%s, blokovací HTTP=%s, JS chyby=%s',
+                    diagnostic['final_hit'], diagnostic['final_activated_by'],
+                    diagnostic['portal_block_statuses'][:8], diagnostic['js_error_count'])
         LOG.warning('Plyn: odeslání nepotvrzeno ve fázi %s (%s), bez opakování; zkontrolujte historii innosvěta', phase, type(exc).__name__)
         raise RuntimeError('Zápis nepotvrzen; bez automatického opakování') from None

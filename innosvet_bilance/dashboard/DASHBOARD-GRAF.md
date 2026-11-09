@@ -18,8 +18,19 @@ Po přidání zdroje případně obnovte stránku prohlížeče s vymazáním ca
 
 ## Význam grafu
 
-- Modrá křivka: `naklady_kc` (průběžný výpočet a odhad dodavatele).
-- Oranžová přerušovaná křivka: `podle_zaloh_kc` (srovnávací hodnoty dle dat innogy; **nejde o potvrzení připsání jednotlivých plateb**).
+- Fialová plná část: `naklady_kc` (dosavadní výpočet innogy, včetně průběžného aktuálního měsíce).
+- Fialová přerušovaná část: budoucí prognóza `naklady_kc`.
+- Oranžová plná křivka: `podle_zaloh_kc` (srovnávací hodnoty dle dat innogy; **nejde o potvrzení připsání jednotlivých plateb**).
 - Šedé pozadí označuje měsíce **po aktuálním měsíci**, pokud jej lze nalézt v atributech. Současný měsíc může zahrnovat odhad.
 - Data se obnovují automaticky ze stavů entit Home Assistantu. Karta neposílá žádné požadavky do innosvěta.
 - Graf není senzor `total_increasing` pro Energy Dashboard, protože výpočty dodavatele se mohou zpětně měnit.
+
+## Změna pro alpha14
+
+Po aktualizaci doplňku na alpha14 **ručně nahraďte** `/config/www/innosvet-cost-chart.js` novou verzí ze složky `dashboard` a obnovte stránku prohlížeče (Ctrl+F5). Aktualizace doplňku soubor v `/config/www` sama nemění. YAML karty a entity mohou zůstat stejné.
+
+Fialová plná část zobrazuje výpočet innogy do aktuálního měsíce (který může obsahovat odhad), fialová přerušovaná budoucí měsíce, oranžová referenci podle záloh. Kliknutím na bod lze zobrazit Kč a jejich rozdíl.
+
+### Oprava ovládání hodnot grafu (alpha14)
+
+Podrobnosti měsíce se při pohybu kurzoru průběžně zobrazují **trvale v textovém řádku pod grafem**. Kliknutím kamkoli do vykreslovací plochy grafu lze měsíc připnout; šipky vlevo/vpravo při zaměření grafu měsíce přepínají. Karta při běžných aktualizacích HA nepřekresluje SVG, pokud se finanční data nezměnila, a proto hodnoty neblikají. Po přepnutí plynu/elektřiny se výběr měsíce vynuluje. Tato oprava nemění kód doplňku, jen `innosvet-cost-chart.js`.

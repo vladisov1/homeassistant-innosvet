@@ -1,3 +1,13 @@
+## 0.1.0-alpha14 (2026-11-09)
+
+- Dodatečná oprava grafové karty: stabilní zobrazení hodnot při pohybu myši a aktualizaci HA, možnost připnout měsíc kliknutím do celé plochy grafu; bez změn logiky odečtů nebo čísel verzí add-onu.
+
+- Grafová karta: samostatně rozlišené dosavadní náklady (fialová plná), budoucí výhled (fialová přerušovaná) a srovnání podle záloh (oranžová).
+- Kliknutí, pohyb kurzoru a klávesnice umožňují číst částku každého měsíčního bodu; označení aktuálního měsíce a počátku účtovacího období.
+- Zachovány finance a odesílání plynu beze změn.
+- Již ručně nainstalovaný JS soubor v /config/www/ je nutné aktualizovat samostatně; aktualizace add-onu jej nepřepíše.
+- Ostrý test v HAOS dosud neproveden.
+
 ## 0.1.0-alpha13 (2026-11-09) – volitelná optimalizace zápisů a graf v HA
 
 - `gas_write_optimized` (výchozí `false`) zachovává nezměněný provoz alpha12, dokud jej uživatel nezapne.

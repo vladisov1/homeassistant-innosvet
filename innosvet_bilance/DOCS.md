@@ -131,3 +131,13 @@ Zachytávání grafu začíná při prvním otevření smlouvy. V protokolu se m
 ## Alpha10 – ověřování období grafu
 
 JSON `BillsGraph` je mapován na kalendářní měsíce přednostně přes jeho vlastní datumová pole. Pokud toto mapování nelze bezpečně potvrdit, doplněk ponechá starší hodnoty a vypíše `graf_obdobi_nezjisteno` nebo `graf_obdobi_nejednoznacne`. Ověřte správný měsíc a částky podle portálu innosvět.
+
+## Alpha13 – optimalizované plánované zápisy
+
+Volitelný přepínač `gas_write_optimized` je výchozí **vypnutý**, aby aktualizace zachovala chování alpha12. Pokud je zapnutý a současně jsou zapnuté `gas_write_enabled` + `gas_write_confirmed`, proběhne v prvním a posledním čase denního harmonogramu odeslání i tehdy, když se stav od posledního potvrzeného zápisu nezměnil. V mezilehlých časech se odečet odešle jen při změně **celých m³** od posledního potvrzeného zápisu. Při shodě se slot zapíše do deníku jako `skipped_unchanged` a stav MQTT bude `beze_zmeny`. Kontrola finance a grafů běží dál ve všech plánovaných termínech.
+
+Nejasně dokončený zápis **stejné hodnoty** v deníku blokuje nový pokus i v krajních časech; nejprve je nutná kontrola skutečné historie innosvěta. Nevypíná se automaticky ani se nepřepisuje deník. Zachovává se anti-duplicitní pojistka pro jeden časový slot a stávající bezpečné potvrzování.
+
+## Graf pro dashboard
+
+Data obsahuje atribut `body_grafu` u dosavadních nákladů obou smluv. Doplněk přikládá samostatnou, na backendu nezávislou grafovou kartu v `dashboard/innosvet-cost-chart.js` a postup nasazení v `dashboard/DASHBOARD-GRAF.md`. Instalace grafu vyžaduje **ruční přidání** JavaScript zdroje a karty v dashboardu. Žádné stávající zobrazení se automaticky nemění.

@@ -20,6 +20,9 @@ configuration:
   gas_write_confirmed:
     name: "Povolit skutečné odesílání plynu"
     description: "Společně s aktivovanou kontrolou povolí skutečný zápis do innosvěta. Nezapínejte před dokončením testů."
+  gas_write_optimized:
+    name: "Optimalizovat zápisy plynoměru"
+    description: "Volitelné: první a poslední čas dne odešle vždy; mezilehlé pouze při změně celých m³ od posledního potvrzeného zápisu. Při nejasném předchozím výsledku stejného stavu zastaví odeslání do kontroly historie. Výchozí vypnuto."
   finance_extra_enabled:
     name: "Načítat rozšířené finanční údaje"
     description: "Čte náklady z grafu a rozpis uhrazených i budoucích záloh pro obě smlouvy. Nikoho neplatí ani nemění zálohy."

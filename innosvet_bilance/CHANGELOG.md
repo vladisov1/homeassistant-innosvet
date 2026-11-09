@@ -1,3 +1,12 @@
+## 0.1.0-alpha13 (2026-11-09) – volitelná optimalizace zápisů a graf v HA
+
+- `gas_write_optimized` (výchozí `false`) zachovává nezměněný provoz alpha12, dokud jej uživatel nezapne.
+- Při zapnuté optimalizaci se první a poslední plánovaný termín každého místního dne vždy odesílá, mezilehlé termíny jen při změně celých m³ proti poslednímu *potvrzenému* zápisu; při stejné hodnotě se mezilehlý slot zaznamená jako `skipped_unchanged`.
+- Je-li u stejného stavu v deníku nedořešený pokus, další automatický pokus je zablokován a vyžádá se kontrola historie innosvěta. Historie nebyla automaticky ověřena.
+- Přidána samostatná karta `innosvet-cost-chart.js` (bez knihoven třetích stran), která vykreslí 13 bodů načtených z existujících MQTT atributů; návod k ruční instalaci v `DASHBOARD-GRAF.md`.
+- Čtení obou finančních bilancí, stávající MQTT identity a dvoukrokové potvrzení z alpha12 beze změny. Žádné zadávání stavu elektroměru.
+- Statické testy a syntaktické kontroly nejsou náhradou ostrého testu v HAOS.
+
 ## 0.1.0-alpha12 (2026-11-08) – diagnostika a bezpečná aktivace finálního potvrzení
 
 - Před odesláním se kontroluje skutečný cíl kliknutí finálního tlačítka. Pokud myš nemůže zasáhnout tlačítko, použije se **jako první a jediná akce Enter**, místo čekání na timeout kliknutí.

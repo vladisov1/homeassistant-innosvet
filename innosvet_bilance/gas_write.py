@@ -193,6 +193,42 @@ def write_gas(opts, now, slot):
         # V kontrolním režimu nedochází k HTTP POST na innosvět.
         status = preview_gas_form(opts, today, reading)
         return status, reading
+    # Optional optimized schedule: retain alpha12 behavior unless explicitly enabled.
+    # Always send the first and last slot of the configured local day. Middle slots
+    # only send if the integer meter value changed since the last CONFIRMED write.
+    # An unknown/uncertain outcome is never silently treated as a success.
+    if opts.get('gas_write_optimized', False):
+        times = opts['times']
+        local_slot = now.strftime('%H:%M')
+        first_or_last = local_slot in (times[0], times[-1])
+        existing = journal.get('attempts', {}).get(slot)
+        if existing is not None:
+            raise ValueError('Tento plánovaný čas už byl zpracován; bez duplicitního zápisu')
+        previous = journal.get('last_success')
+        if previous is not None and reading < int(previous['reading']):
+            raise ValueError('Hodnota plynoměru klesla pod poslední úspěšný zápis')
+        # A prior ambiguous attempt for the SAME value could have succeeded on
+        # innosvět even though the confirmation was not captured. Do not resend
+        # that value automatically until the history has been checked.
+        uncertain_same_value = any(
+            isinstance(a, dict) and a.get('status') in (
+                'reserved', 'uncertain', 'final_step_uncertain', 'first_step_uncertain'
+            ) and a.get('reading') == reading
+            for a in journal.get('attempts', {}).values()
+        )
+        if uncertain_same_value:
+            LOG.warning('Plyn: stav %s m³ má předchozí nepotvrzený pokus; automatický zápis pozastaven', reading)
+            return 'vyzaduje_kontrolu_historie', reading
+        if not first_or_last and previous is not None and reading == int(previous['reading']):
+            journal.setdefault('attempts', {})[slot] = {
+                'status': 'skipped_unchanged', 'reading': reading,
+                'at': now.isoformat(), 'reason': 'same_as_last_confirmed'
+            }
+            journal_save(journal)
+            LOG.info('Plyn: mezilehlý čas %s, stav %s m³ beze změny od potvrzeného zápisu; odeslání vynecháno', local_slot, reading)
+            return 'beze_zmeny', reading
+        LOG.info('Plyn: optimalizace – %s, stav %s m³',
+                 'první/poslední čas dne' if first_or_last else 'změna celých m³', reading)
     validate_and_reserve(journal, slot, reading, now)
     attempts = journal['attempts']
     request_sent = False

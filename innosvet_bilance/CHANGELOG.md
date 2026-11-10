@@ -1,3 +1,12 @@
+## 0.1.0-alpha15 (2026-11-10) – předpokládaná průměrná cena energií
+
+- Dva nové senzory přes MQTT Discovery: Kč/kWh (elektřina) a Kč/m³ (plyn), dostupné při zapnutém `finance_extra_enabled`.
+- Výpočet: poslední `BillsGraph.CurrentPeriodValue` (odhad skutečných ročních nákladů, nikoli zálohy) / poslední `ConsumptionGraph.CurrentPeriodValue` (roční předpokládaná spotřeba).
+- Přísná kontrola 13 navazujících intervalů `BillsGraph.Period`, 365 navazujících dnů `ConsumptionGraph.Date`, shody začátku a konce zúčtovacího období, rozsahu a platnosti hodnot. Při chybě se nová cena nezveřejňuje a zůstává poslední platná.
+- Atributy uvádějí náklady, spotřebu, období a metodu. Jde o orientační průměr s rozpočítanými stálými platbami, nikoli tarifní sazbu každé další jednotky.
+- Dosavadní zápis plynu, plánování, existující MQTT entity a grafová karta nejsou funkčně měněny.
+- Ověřeno statickými a lokálními testy; živý test v Home Assistant OS teprve následuje.
+
 ## 0.1.0-alpha14 (2026-11-09)
 
 - Dodatečná oprava grafové karty: stabilní zobrazení hodnot při pohybu myši a aktualizaci HA, možnost připnout měsíc kliknutím do celé plochy grafu; bez změn logiky odečtů nebo čísel verzí add-onu.

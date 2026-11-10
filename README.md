@@ -1,4 +1,4 @@
-# innogy innosvět – Home Assistant OS (0.1.0-alpha14)
+# innogy innosvět – Home Assistant OS (0.1.0-alpha15)
 
 Aktuální alfa doplněk rozšiřuje funkční bilanci obou smluv a dříve otestovaný automatický zápis plynoměru o **volitelné čtení nákladů a záloh**. Podrobnosti v [DOCS](innosvet_bilance/DOCS.md) a [CHANGELOG](innosvet_bilance/CHANGELOG.md).
 
@@ -13,3 +13,5 @@ Aktuální alfa doplněk rozšiřuje funkční bilanci obou smluv a dříve otes
 - Volitelná optimalizace odesílání plynoměru (`gas_write_optimized`, **výchozí vypnuto**).
 - Přiložená grafová karta bez závislostí: [návod k instalaci](innosvet_bilance/dashboard/DASHBOARD-GRAF.md). Vyžaduje samostatné ruční přidání do Home Assistant dashboardu.
 - Ostrý test alpha13 na skutečném innosvětě dosud neproběhl; zachován ověřený postup finálního potvrzení alpha12.
+
+Nové cenové senzory alpha15: [CENOVE-SENZORY.md](innosvet_bilance/CENOVE-SENZORY.md).

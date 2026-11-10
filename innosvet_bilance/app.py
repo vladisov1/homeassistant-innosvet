@@ -156,6 +156,18 @@ def publish_discovery(client):
                 "unit_of_measurement": unit,
                 "device": device_extra, "icon": icon,
             }, ensure_ascii=False))
+    # Average annual customer price, based on actual forecast costs, NOT deposits.
+    for kind, name, unit in (("plyn", "Plyn", "Kč/m³"), ("elektrina", "Elektřina", "Kč/kWh")):
+        mqtt_publish(client, f"homeassistant/sensor/innosvet_{kind}_prumerna_cena/config", json.dumps({
+            "name": f"innosvět {name} – předpokládaná průměrná cena",
+            "unique_id": f"innosvet_{kind}_prumerna_cena_v1",
+            "state_topic": f"{STATE_PREFIX}/{kind}/finance/prumerna_cena",
+            "json_attributes_topic": f"{STATE_PREFIX}/{kind}/finance/prumerna_cena_attributes",
+            "availability_topic": STATE_PREFIX + "/availability",
+            "unit_of_measurement": unit,
+            "state_class": "measurement",
+            "device": device, "icon": "mdi:cash",
+        }, ensure_ascii=False))
     mqtt_publish(client, STATE_PREFIX + "/availability", "online")
 
 
@@ -337,6 +349,11 @@ def publish_finance(client, extra, now):
                 mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/{key}", f"{costs[key]:.2f}")
             costs.update(updated_at=now, source='innosvet', read_only=True)
             mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/cost_attributes", json.dumps(costs, ensure_ascii=False))
+            price = costs.get('jednotkova_cena')
+            if price:
+                mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/prumerna_cena", f"{price['cena']:.4f}")
+                mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/prumerna_cena_attributes",
+                             json.dumps(dict(price, updated_at=now, source='innosvet', read_only=True), ensure_ascii=False))
         if 'zalohy' in fragments:
             payments = dict(fragments['zalohy'])
             for key in ('mesicni_zaloha_kc', 'budouci_zbyva_kc', 'nejblizsi_zbyva_kc'):

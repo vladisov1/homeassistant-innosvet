@@ -206,6 +206,66 @@ def _month_shift(year, month, offset):
     return f'{x // 12:04d}-{x % 12 + 1:02d}'
 
 
+def _period_boundaries(payload):
+    """Require first/last exact Czech date intervals from BillsGraph."""
+    if len(payload) != 13:
+        raise ValueError('unexpected bills count')
+    def parse(record):
+        raw = record.get('Period')
+        if not isinstance(raw, str):
+            raise ValueError('missing period')
+        match = re.fullmatch(r'\s*([0-3]?\d)\.\s*([01]?\d)\.\s*(20\d{2})\s*-\s*([0-3]?\d)\.\s*([01]?\d)\.\s*(20\d{2})\s*', raw)
+        if not match:
+            raise ValueError('bad period')
+        a = date(int(match[3]), int(match[2]), int(match[1]))
+        b = date(int(match[6]), int(match[5]), int(match[4]))
+        if a > b:
+            raise ValueError('reversed period')
+        return a, b
+    spans = [parse(r) for r in payload]
+    for before, after in zip(spans, spans[1:]):
+        if (after[0] - before[1]).days != 1:
+            raise ValueError('discontinuous bills period')
+    return spans[0][0], spans[-1][1]
+
+
+def _consumption_iso_day(raw):
+    if not isinstance(raw, str):
+        raise ValueError('missing consumption date')
+    match = re.fullmatch(r'(20\d{2}-\d{2}-\d{2})T00:00:00(?:\.\d+)?Z', raw)
+    if not match:
+        raise ValueError('unexpected date format')
+    return date.fromisoformat(match[1])
+
+
+def calculate_unit_price(bills, consumption, kind):
+    """Annual average, forecast costs / forecast consumption, never deposits."""
+    if kind not in ('plyn', 'elektrina') or not isinstance(consumption, list) or len(consumption) != 365:
+        raise ValueError('unexpected consumption series')
+    first, last = _period_boundaries(bills)
+    days = [_consumption_iso_day(x.get('Date')) for x in consumption if isinstance(x, dict)]
+    if len(days) != 365 or days[0] != first or days[-1] != last or (last - first).days != 364:
+        raise ValueError('different billing periods')
+    if any((right - left).days != 1 for left, right in zip(days, days[1:])):
+        raise ValueError('consumption dates discontinuous')
+    costs = money(bills[-1]['CurrentPeriodValue'])
+    usage = consumption[-1].get('CurrentPeriodValue')
+    if isinstance(usage, bool) or not isinstance(usage, (int, float)) or not math.isfinite(usage) or usage <= 0 or usage > 1e9:
+        raise ValueError('invalid consumption')
+    if consumption[-1].get('CurrentPeriodType') not in ('R', 'S'):
+        raise ValueError('invalid consumption type')
+    if costs <= 0:
+        raise ValueError('invalid projected costs')
+    price = round(costs / usage, 4)
+    return {'cena': price, 'naklady_predpoklad_kc': costs,
+            'spotreba_predpoklad': round(usage, 2),
+            'jednotka_spotreby': 'm³' if kind == 'plyn' else 'kWh',
+            'obdobi_od': first.isoformat(), 'obdobi_do': last.isoformat(),
+            'metoda': 'odhad_nakladu_deleno_odhad_spotreby',
+            'charakter': 'prumerna_cena_vcetne_rozpocitanych_stalych_plateb',
+            'prognosticka_data': consumption[-1]['CurrentPeriodType'] == 'S'}
+
+
 def read_cost_graph(page, contract_id, kind):
     """Listen before the FIRST navigation to the contract details page.
 
@@ -214,11 +274,14 @@ def read_cost_graph(page, contract_id, kind):
     synchronously read the body while the navigation is ongoing.
     """
     responses = []
+    consumption_responses = []
 
     def on_response(response):
         url = urlparse(response.url)
         if url.hostname == HOST and url.path == '/innogy24ajax/BillsGraph':
             responses.append(response)
+        elif url.hostname == HOST and url.path == '/innogy24ajax/ConsumptionGraph':
+            consumption_responses.append(response)
 
     page.on('response', on_response)
     try:
@@ -272,12 +335,28 @@ def read_cost_graph(page, contract_id, kind):
         measured = next((x for x in points if x['mesic'] == current), None)
         if measured is None:
             raise RuntimeError('graf_aktualni_mesic_nenalezen')
-        return {'dosavadni_naklady_kc': measured['naklady_kc'],
+        result = {'dosavadni_naklady_kc': measured['naklady_kc'],
                 'predpoklad_podle_zaloh_kc': measured['podle_zaloh_kc'],
                 'odhad_konec_obdobi_kc': points[-1]['naklady_kc'],
                 'body_grafu': points, 'graf_zacatek': start.isoformat(),
                 'graf_obdobi_zdroj': period_source,
                 'mesic_zobrazenych_nakladu': current,
                 'poznamka': 'Průběžná kalkulace innogy; bod aktuálního měsíce může obsahovat odhad.'}
+        # Optional price: preserve working cost data even when consumption is missing.
+        # Never infer a price from the deposit/baseline series.
+        for _ in range(20):
+            if consumption_responses:
+                break
+            page.wait_for_timeout(500)
+        for response in consumption_responses:
+            if response.status != 200:
+                continue
+            try:
+                consumption = response.json()
+                result['jednotkova_cena'] = calculate_unit_price(data, consumption, kind)
+                break
+            except (ValueError, TypeError, KeyError, OverflowError):
+                continue
+        return result
     finally:
         page.remove_listener('response', on_response)

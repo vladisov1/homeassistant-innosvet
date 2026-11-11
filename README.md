@@ -1,4 +1,4 @@
-# innogy innosvět – Home Assistant OS (0.1.0-alpha16)
+# innogy innosvět – Home Assistant OS (0.1.0-alpha17)
 
 Aktuální alfa doplněk rozšiřuje funkční bilanci obou smluv a dříve otestovaný automatický zápis plynoměru o **volitelné čtení nákladů a záloh**. Podrobnosti v [DOCS](innosvet_bilance/DOCS.md) a [CHANGELOG](innosvet_bilance/CHANGELOG.md).
 
@@ -15,3 +15,7 @@ Aktuální alfa doplněk rozšiřuje funkční bilanci obou smluv a dříve otes
 - Ostrý test alpha13 na skutečném innosvětě dosud neproběhl; zachován ověřený postup finálního potvrzení alpha12.
 
 Nové cenové senzory alpha15: [CENOVE-SENZORY.md](innosvet_bilance/CENOVE-SENZORY.md).
+
+### Alpha17 – kontrola nepotvrzených odečtů
+
+Doplněk publikuje přes MQTT nový senzor **innosvět – kontrola odečtu** a dvě tlačítka potvrzení historie. Tlačítka se používají jen po ruční kontrole historie na portálu; nikdy sama neodesílají odečet. Při více nevyřešených pokusech se řeší nejstarší. Testujte nejprve s vypnutým skutečným odesíláním.

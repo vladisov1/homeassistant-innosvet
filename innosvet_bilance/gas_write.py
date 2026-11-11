@@ -83,35 +83,51 @@ def journal_save(journal):
     temp.replace(JOURNAL)
 
 
-def resolve_reviewed_attempt(review_token):
-    """Explicit one-time acknowledgement of a portal-verified absent reading.
+UNRESOLVED_STATUSES = ('reserved', 'uncertain', 'final_step_uncertain', 'first_step_uncertain')
 
-    Token format: YYYY-MM-DDTHH:MM|integer_reading|NOT_RECORDED.
-    Never deletes an audit entry and never performs a portal submission.
+
+def pending_review():
+    """Oldest unresolved attempt. No credentials or portal data are exposed."""
+    attempts = journal_read().get('attempts', {})
+    candidates = [
+        {'slot': slot, 'reading': int(attempt['reading'])}
+        for slot, attempt in attempts.items()
+        if isinstance(attempt, dict) and attempt.get('status') in UNRESOLVED_STATUSES
+        and isinstance(attempt.get('reading'), int)
+    ]
+    return min(candidates, key=lambda v: v['slot']) if candidates else None
+
+
+def resolve_reviewed_attempt(review_token):
+    """Review EXACT pending slot+reading after checking the external portal.
+
+    No portal write is ever performed. Stale commands are rejected.
     """
     token = str(review_token or '').strip()
-    if not token:
-        return False
-    match = re.fullmatch(r'(\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d)\|([1-9]\d*)\|NOT_RECORDED', token)
+    match = re.fullmatch(r'(\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d)\|([1-9]\d*)\|(RECORDED|NOT_RECORDED)', token)
     if not match:
-        raise ValueError('Neplatné potvrzení historie: očekává se YYYY-MM-DDTHH:MM|stav|NOT_RECORDED')
-    slot, reading = match.group(1), int(match.group(2))
+        raise ValueError('Neplatný příkaz kontroly odečtu')
+    slot, reading, outcome = match.group(1), int(match.group(2)), match.group(3)
     datetime.strptime(slot, '%Y-%m-%dT%H:%M')
     journal = journal_read()
     attempt = journal.get('attempts', {}).get(slot)
-    if not isinstance(attempt, dict) or int(attempt.get('reading', -1)) != reading:
-        raise ValueError('V deníku neexistuje přesně tento pokus a hodnota; beze změny')
-    if attempt.get('status') == 'verified_not_recorded':
-        LOG.info('Plyn: historicky ověřený nezapsaný pokus %s již byl uzavřen', slot)
-        return False
-    if attempt.get('status') not in ('reserved', 'uncertain', 'final_step_uncertain', 'first_step_uncertain'):
-        raise ValueError('Pokus není ve stavu vyžadujícím kontrolu; beze změny')
+    pending = pending_review()
+    if pending != {'slot': slot, 'reading': reading}:
+        raise ValueError('Zastaralé potvrzení nebo jiný dosud nevyřešený pokus')
+    if not isinstance(attempt, dict) or attempt.get('status') not in UNRESOLVED_STATUSES or attempt.get('reading') != reading:
+        raise ValueError('Odečet není ve stavu vyžadujícím potvrzení')
     attempt['previous_status'] = attempt['status']
-    attempt['status'] = 'verified_not_recorded'
+    attempt['status'] = 'verified_recorded' if outcome == 'RECORDED' else 'verified_not_recorded'
     attempt['reviewed_at'] = datetime.now().astimezone().isoformat()
-    attempt['review_note'] = 'Uzivatel overil v historii innosveta: odečet není zaznamenán'
+    attempt['review_note'] = ('Uživatel ověřil v innosvětě: zaznamenáno' if outcome == 'RECORDED'
+                              else 'Uživatel ověřil v innosvětě: nezaznamenáno')
+    if outcome == 'RECORDED':
+        last = journal.get('last_success')
+        if last is None or reading >= int(last['reading']):
+            journal['last_success'] = {'reading': reading, 'at': attempt['reviewed_at'],
+                                       'source': 'user_verified_portal_history'}
     journal_save(journal)
-    LOG.warning('Plyn: ručně uzavřen nezapsaný odečet %s m³, čas %s; žádný nový zápis neproveden', reading, slot)
+    LOG.warning('Plyn: odečet %s m³ (%s) uzavřen jako %s; bez nového odeslání', reading, slot, attempt['status'])
     return True
 
 

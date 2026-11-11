@@ -4,6 +4,7 @@ Default is READ ONLY. Never log credentials, URLs with query parameters, cookies
 or request bodies. Gas writing requires TWO explicit opt-in switches.
 """
 import json
+import queue
 import logging
 import os
 import re
@@ -73,7 +74,6 @@ def load_options():
     opts["gas_write_enabled"] = bool(opts.get("gas_write_enabled", False))
     opts["gas_write_confirmed"] = bool(opts.get("gas_write_confirmed", False))
     opts["gas_write_optimized"] = bool(opts.get("gas_write_optimized", False))
-    opts["gas_review_failed_attempt"] = str(opts.get("gas_review_failed_attempt", "")).strip()
     opts["gas_entity_id"] = str(opts.get("gas_entity_id", "sensor.plynomer_celkovy_stav")).strip()
     if not re.fullmatch(r"sensor\.[a-z0-9_]+", opts["gas_entity_id"]):
         raise ValueError("gas_entity_id musí být platná entita sensor.*")
@@ -157,6 +157,16 @@ def publish_discovery(client):
                 "unit_of_measurement": unit,
                 "device": device_extra, "icon": icon,
             }, ensure_ascii=False))
+    # User-facing review: the buttons are inert unless exactly matching
+    # unresolved attempt is displayed. Their payload is refreshed per attempt.
+    mqtt_publish(client, 'homeassistant/sensor/innosvet_gas_review/config', json.dumps({
+        'name': 'innosvět – kontrola odečtu',
+        'unique_id': 'innosvet_gas_review_v1',
+        'state_topic': STATE_PREFIX + '/gas_review/state',
+        'json_attributes_topic': STATE_PREFIX + '/gas_review/attributes',
+        'availability_topic': STATE_PREFIX + '/availability',
+        'device': device, 'icon': 'mdi:clipboard-alert',
+    }, ensure_ascii=False))
     # Average annual customer price, based on actual forecast costs, NOT deposits.
     for kind, name, unit in (("plyn", "Plyn", "Kč/m³"), ("elektrina", "Elektřina", "Kč/kWh")):
         mqtt_publish(client, f"homeassistant/sensor/innosvet_{kind}_prumerna_cena/config", json.dumps({
@@ -363,6 +373,47 @@ def publish_finance(client, extra, now):
             mqtt_publish(client, f"{STATE_PREFIX}/{kind}/finance/payment_attributes", json.dumps(payments, ensure_ascii=False))
 
 
+REVIEW_COMMAND_TOPIC = STATE_PREFIX + '/gas_review/command'
+
+
+def publish_gas_review(client):
+    """Display current unresolved attempt; update exact-match button payloads."""
+    from gas_write import pending_review
+    pending = pending_review()
+    mqtt_publish(client, STATE_PREFIX + '/gas_review/state',
+                 'vyžaduje kontrolu' if pending else 'bez nevyřešeného odečtu')
+    mqtt_publish(client, STATE_PREFIX + '/gas_review/attributes',
+                 json.dumps({'datum_a_cas': pending['slot'] if pending else None,
+                             'stav_m3': pending['reading'] if pending else None,
+                             'pokyn': 'Nejdříve ověřte historii odečtů na portálu innosvět.' if pending else ''},
+                            ensure_ascii=False))
+    for kind, label, icon in (
+        ('recorded', 'Odečet JE v innosvětě – potvrdit', 'mdi:check-circle-outline'),
+        ('not_recorded', 'Odečet NENÍ v innosvětě – potvrdit', 'mdi:close-circle-outline'),
+    ):
+        # Discovery payload contains the exact pending attempt identity.
+        payload = f"{pending['slot']}|{pending['reading']}|{kind.upper()}" if pending else 'NONE'
+        mqtt_publish(client, f'homeassistant/button/innosvet_gas_review_{kind}/config',
+                     json.dumps({'name': 'innosvět – ' + label,
+                                 'unique_id': f'innosvet_gas_review_{kind}_v1',
+                                 'command_topic': REVIEW_COMMAND_TOPIC,
+                                 'payload_press': payload,
+                                 'availability_topic': STATE_PREFIX + '/availability',
+                                 'device': {'identifiers': ['innosvet_finance_readonly'],
+                                            'name': 'innogy innosvět'},
+                                 'icon': icon}, ensure_ascii=False))
+
+
+def apply_review_command(payload):
+    from gas_write import resolve_reviewed_attempt
+    import re
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}\|\d+\|(RECORDED|NOT_RECORDED)', payload):
+        LOG.warning('Plyn: neplatný nebo neaktuální příkaz potvrzení ignorován')
+        return False
+    slot, reading, result = payload.split('|')
+    return resolve_reviewed_attempt(payload)
+
+
 def handle_stop(_signum, _frame):
     global STOP
     STOP = True
@@ -373,16 +424,21 @@ def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
     options = load_options()
-    # Explicit operator acknowledgement; no portal request is made here.
-    if options.get('gas_review_failed_attempt'):
-        from gas_write import resolve_reviewed_attempt
-        resolve_reviewed_attempt(options['gas_review_failed_attempt'])
     tz = ZoneInfo(options["timezone"])
     client = None
     try:
         client = mqtt_connection()
         publish_discovery(client)
-        LOG.info("Spuštěno innosvět 0.1.0-alpha16; časy: %s; automatický zápis plynu: %s",
+        review_queue = queue.Queue()
+        def _review_message(_client, _userdata, message):
+            try:
+                review_queue.put_nowait(message.payload.decode('ascii'))
+            except (UnicodeDecodeError, ValueError):
+                LOG.warning('Plyn: neplatný požadavek na kontrolu odečtu')
+        client.on_message = _review_message
+        client.subscribe(REVIEW_COMMAND_TOPIC, qos=1)
+        publish_gas_review(client)
+        LOG.info("Spuštěno innosvět 0.1.0-alpha17; časy: %s; automatický zápis plynu: %s",
                  ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
         if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
             LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")
@@ -391,6 +447,17 @@ def main():
         last_day_slot = None
         first_run = True
         while not STOP:
+            try:
+                while True:
+                    command = review_queue.get_nowait()
+                    try:
+                        if apply_review_command(command):
+                            LOG.warning('Plyn: uživatel uzavřel konkrétní nepotvrzený odečet; nic neodesláno')
+                    except (ValueError, RuntimeError, OSError) as exc:
+                        LOG.warning('Plyn: potvrzení odmítnuto (%s); bez změny', type(exc).__name__)
+                    publish_gas_review(client)
+            except queue.Empty:
+                pass
             now = datetime.now(tz)
             slot = (now.date().isoformat(), now.strftime("%H:%M"))
             due = slot[1] in options["times"] and slot != last_day_slot
@@ -422,6 +489,7 @@ def main():
                         "reading_m3": reading, "slot": slot[0] + " " + slot[1],
                     }, ensure_ascii=False))
                     LOG.info("Plyn: výsledek plánovaného běhu: %s", status)
+                    publish_gas_review(client)
                 except Exception as exc:
                     from gas_write import GasReadError
                     if isinstance(exc, GasReadError):
@@ -429,6 +497,7 @@ def main():
                     else:
                         LOG.warning("Plyn: zápis nepotvrzen (%s), bez automatického opakování", type(exc).__name__)
                     mqtt_publish(client, STATE_PREFIX + "/gas_write_status", "chyba")
+                    publish_gas_review(client)
             first_run = False
             for _ in range(20):
                 if STOP:

@@ -15,10 +15,10 @@ configuration:
     name: "Senzor stavu plynoměru"
     description: "Entita v Home Assistantu s celkovým stavem plynoměru v m³, například sensor.plynomer_celkovy_stav."
   gas_write_enabled:
-    name: "Aktivovat kontrolu zápisu plynu"
+    name: "Zápis plynu – zapnout kontrolu formuláře"
     description: "Při plánovaném spuštění otevře formulář plynu a zkontroluje vyplněný stav. Bez druhého povolení nic neodešle."
   gas_write_confirmed:
-    name: "Povolit skutečné odesílání plynu"
+    name: "Zápis plynu – skutečně odesílat"
     description: "Společně s aktivovanou kontrolou povolí skutečný zápis do innosvěta. Nezapínejte před dokončením testů."
   gas_write_optimized:
     name: "Optimalizovat zápisy plynoměru"

@@ -1,3 +1,12 @@
+## 0.1.0-alpha17 (2026-11-11) – ruční kontrola odečtů v Home Assistantu
+
+- Nový MQTT senzor se stavem nejstaršího nepotvrzeného zápisu a atributy datum/čas a stav m³.
+- Dvě MQTT tlačítka: „Odečet JE v innosvětě“ a „Odečet NENÍ v innosvětě“. Akce ověřuje přesnou identitu pokusu, zapisuje auditní závěr do existujícího deníku a nic neodesílá.
+- Odstraněno nepřehledné ruční pole `gas_review_failed_attempt` z konfigurace.
+- Zachována optimalizace: první a poslední čas dne povinný, mezilehlé pouze při změně celých m³; nevyřešené zápisy zůstávají blokované až do ruční kontroly.
+- Finanční senzory, graf a rozpisy beze změny.
+- Staticky zkontrolováno a lokálně testována logika deníku. Živý test MQTT v HAOS a potvrzování innosvěta dosud nebyl proveden.
+
 ## 0.1.0-alpha16 (2026-11-11) – kontrolované potvrzení odečtu
 
 - Opraven zastaralý text verze v provozním logu (`alpha13` → `alpha16`).

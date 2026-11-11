@@ -73,6 +73,7 @@ def load_options():
     opts["gas_write_enabled"] = bool(opts.get("gas_write_enabled", False))
     opts["gas_write_confirmed"] = bool(opts.get("gas_write_confirmed", False))
     opts["gas_write_optimized"] = bool(opts.get("gas_write_optimized", False))
+    opts["gas_review_failed_attempt"] = str(opts.get("gas_review_failed_attempt", "")).strip()
     opts["gas_entity_id"] = str(opts.get("gas_entity_id", "sensor.plynomer_celkovy_stav")).strip()
     if not re.fullmatch(r"sensor\.[a-z0-9_]+", opts["gas_entity_id"]):
         raise ValueError("gas_entity_id musí být platná entita sensor.*")
@@ -372,12 +373,16 @@ def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
     options = load_options()
+    # Explicit operator acknowledgement; no portal request is made here.
+    if options.get('gas_review_failed_attempt'):
+        from gas_write import resolve_reviewed_attempt
+        resolve_reviewed_attempt(options['gas_review_failed_attempt'])
     tz = ZoneInfo(options["timezone"])
     client = None
     try:
         client = mqtt_connection()
         publish_discovery(client)
-        LOG.info("Spuštěno innosvět 0.1.0-alpha13; časy: %s; automatický zápis plynu: %s",
+        LOG.info("Spuštěno innosvět 0.1.0-alpha16; časy: %s; automatický zápis plynu: %s",
                  ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
         if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
             LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")

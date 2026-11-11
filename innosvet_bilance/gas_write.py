@@ -83,6 +83,38 @@ def journal_save(journal):
     temp.replace(JOURNAL)
 
 
+def resolve_reviewed_attempt(review_token):
+    """Explicit one-time acknowledgement of a portal-verified absent reading.
+
+    Token format: YYYY-MM-DDTHH:MM|integer_reading|NOT_RECORDED.
+    Never deletes an audit entry and never performs a portal submission.
+    """
+    token = str(review_token or '').strip()
+    if not token:
+        return False
+    match = re.fullmatch(r'(\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d)\|([1-9]\d*)\|NOT_RECORDED', token)
+    if not match:
+        raise ValueError('Neplatné potvrzení historie: očekává se YYYY-MM-DDTHH:MM|stav|NOT_RECORDED')
+    slot, reading = match.group(1), int(match.group(2))
+    datetime.strptime(slot, '%Y-%m-%dT%H:%M')
+    journal = journal_read()
+    attempt = journal.get('attempts', {}).get(slot)
+    if not isinstance(attempt, dict) or int(attempt.get('reading', -1)) != reading:
+        raise ValueError('V deníku neexistuje přesně tento pokus a hodnota; beze změny')
+    if attempt.get('status') == 'verified_not_recorded':
+        LOG.info('Plyn: historicky ověřený nezapsaný pokus %s již byl uzavřen', slot)
+        return False
+    if attempt.get('status') not in ('reserved', 'uncertain', 'final_step_uncertain', 'first_step_uncertain'):
+        raise ValueError('Pokus není ve stavu vyžadujícím kontrolu; beze změny')
+    attempt['previous_status'] = attempt['status']
+    attempt['status'] = 'verified_not_recorded'
+    attempt['reviewed_at'] = datetime.now().astimezone().isoformat()
+    attempt['review_note'] = 'Uzivatel overil v historii innosveta: odečet není zaznamenán'
+    journal_save(journal)
+    LOG.warning('Plyn: ručně uzavřen nezapsaný odečet %s m³, čas %s; žádný nový zápis neproveden', reading, slot)
+    return True
+
+
 def validate_and_reserve(journal, slot, reading, now):
     attempts = journal.setdefault('attempts', {})
     if slot in attempts:
@@ -193,6 +225,19 @@ def write_gas(opts, now, slot):
         # V kontrolním režimu nedochází k HTTP POST na innosvět.
         status = preview_gas_form(opts, today, reading)
         return status, reading
+    # Block an unresolved attempt for the SAME reading even when optimization
+    # is disabled. Do not silently bypass the safety journal.
+    if slot in journal.get('attempts', {}):
+        raise ValueError('Tento plánovaný čas už byl zpracován; bez duplicitního zápisu')
+    unresolved_same_value = any(
+        isinstance(a, dict) and a.get('status') in (
+            'reserved', 'uncertain', 'final_step_uncertain', 'first_step_uncertain'
+        ) and a.get('reading') == reading
+        for a in journal.get('attempts', {}).values()
+    )
+    if unresolved_same_value:
+        LOG.warning('Plyn: stav %s m³ má předchozí nepotvrzený pokus; automatický zápis pozastaven', reading)
+        return 'vyzaduje_kontrolu_historie', reading
     # Optional optimized schedule: retain alpha12 behavior unless explicitly enabled.
     # Always send the first and last slot of the configured local day. Middle slots
     # only send if the integer meter value changed since the last CONFIRMED write.
@@ -207,18 +252,6 @@ def write_gas(opts, now, slot):
         previous = journal.get('last_success')
         if previous is not None and reading < int(previous['reading']):
             raise ValueError('Hodnota plynoměru klesla pod poslední úspěšný zápis')
-        # A prior ambiguous attempt for the SAME value could have succeeded on
-        # innosvět even though the confirmation was not captured. Do not resend
-        # that value automatically until the history has been checked.
-        uncertain_same_value = any(
-            isinstance(a, dict) and a.get('status') in (
-                'reserved', 'uncertain', 'final_step_uncertain', 'first_step_uncertain'
-            ) and a.get('reading') == reading
-            for a in journal.get('attempts', {}).values()
-        )
-        if uncertain_same_value:
-            LOG.warning('Plyn: stav %s m³ má předchozí nepotvrzený pokus; automatický zápis pozastaven', reading)
-            return 'vyzaduje_kontrolu_historie', reading
         if not first_or_last and previous is not None and reading == int(previous['reading']):
             journal.setdefault('attempts', {})[slot] = {
                 'status': 'skipped_unchanged', 'reading': reading,
@@ -438,40 +471,12 @@ def write_gas(opts, now, slot):
                 if final_hit['width'] <= 0 or final_hit['height'] <= 0:
                     raise RuntimeError('Finální tlačítko nemá platné rozměry')
                 LOG.info('Plyn: finální odeslání – zahajuji jedinou aktivaci')
-                if not diagnostic['final_hit']:
-                    # No pointer interaction took place. Enter is the primary action.
-                    diagnostic['final_activated_by'] = 'keyboard_primary'
-                    send.focus(timeout=5000)
-                    send.press('Enter', timeout=8000, no_wait_after=True)
-                else:
-                    diagnostic['final_activated_by'] = 'pointer_primary'
-                    try:
-                        send.click(timeout=8000, no_wait_after=True)
-                    except PlaywrightTimeout:
-                        # A timeout does not prove that a request was not sent.
-                        # Preserve alpha11's guarded, single fallback, but never
-                        # reactivate after a normal click or an ambiguous result.
-                        if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
-                            raise RuntimeError('Finální kliknutí nejisté; POST začal') from None
-                        active.wait_for_timeout(1500)
-                        if post_gate['counts']['final'] != 0 or post_gate['phase'] != 'final':
-                            raise RuntimeError('Finální kliknutí nejisté; opožděný POST') from None
-                        if (send.count() != 1 or not send.is_visible() or not send.is_enabled()
-                            or active.get_by_text('Shrnutí před odesláním', exact=False).count() == 0):
-                            raise RuntimeError('Rekapitulace po timeoutu změněna') from None
-                        summary_after = active.locator('body').inner_text(timeout=10000)
-                        condensed_after = re.sub(r'[\s\u00a0\u202f]', '', summary_after)
-                        if (str(reading) not in condensed_after or
-                            (today not in summary_after and today not in condensed_after)):
-                            raise RuntimeError('Stav či datum rekapitulace se změnily') from None
-                        if diagnostic['portal_block_statuses']:
-                            raise RuntimeError('Portál vrátil bezpečnostní HTTP stav') from None
-                        # Check again: if the click did not trigger a request but
-                        # could have changed the page, do not send twice.
-                        diagnostic['final_activated_by'] = 'keyboard_after_pointer_timeout'
-                        LOG.warning('Plyn: finální kliknutí timeout bez POST; ověřeno, jediné Enter')
-                        send.focus(timeout=5000)
-                        send.press('Enter', timeout=8000, no_wait_after=True)
+                # A single keyboard activation avoids the Playwright pointer
+                # actionability race seen on 2026-11-11. No pointer fallback and
+                # no second activation are permitted on an ambiguous outcome.
+                diagnostic['final_activated_by'] = 'keyboard_primary'
+                send.focus(timeout=5000)
+                send.press('Enter', timeout=8000, no_wait_after=True)
                 LOG.info('Plyn: finální aktivace=%s; počet zachycených POST=%s',
                          diagnostic['final_activated_by'], post_gate['counts']['final'])
                 # Guard blocks any additional POST; accept only a portal confirmation.

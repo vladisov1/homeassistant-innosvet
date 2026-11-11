@@ -1,3 +1,12 @@
+## 0.1.0-alpha16 (2026-11-11) – kontrolované potvrzení odečtu
+
+- Opraven zastaralý text verze v provozním logu (`alpha13` → `alpha16`).
+- Finální tlačítko odeslání odečtu se aktivuje pouze jednou klávesou Enter. Odstraněna možnost další aktivace po timeoutu kliknutí. Stále se vyžaduje jednoznačný POST, úspěšná HTTP odpověď i potvrzení na stránce.
+- Nevyřešený pokus o stejnou hodnotu blokuje nový zápis také při vypnuté optimalizaci.
+- Nové volitelné pole `gas_review_failed_attempt` umožňuje po ruční kontrole portálu auditovatelně uzavřít přesně určený nepotvrzený pokus jako nezapsaný, bez automatického odeslání. Detaily v `KONTROLA-ODECTU.md`.
+- Žádné mazání deníku, žádné automatické opakování, žádná změna naplánovaných časů ani finančních senzorů.
+- **Neověřeno proti živému portálu innosvět; vyžaduje dozorovaný test.**
+
 ## 0.1.0-alpha15 (2026-11-10) – předpokládaná průměrná cena energií
 
 - Dva nové senzory přes MQTT Discovery: Kč/kWh (elektřina) a Kč/m³ (plyn), dostupné při zapnutém `finance_extra_enabled`.

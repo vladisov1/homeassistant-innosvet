@@ -1,5 +1,5 @@
 name: "innosvět – plyn a bilance (ALPHA)"
-version: "0.1.0-alpha15"
+version: "0.1.0-alpha16"
 slug: "innosvet_bilance"
 description: "Finanční bilance a volitelný zápis plynoměru (ve výchozím stavu vypnuto)"
 arch:
@@ -19,6 +19,7 @@ options:
   gas_write_enabled: false
   gas_write_confirmed: false
   gas_write_optimized: false
+  gas_review_failed_attempt: ""
   finance_extra_enabled: false
   read_on_start: true
   schedule: "05:55,11:55,17:55,23:55"
@@ -32,6 +33,7 @@ schema:
   gas_write_enabled: bool
   gas_write_confirmed: bool
   gas_write_optimized: bool
+  gas_review_failed_attempt: str?
   finance_extra_enabled: bool
   read_on_start: bool
   schedule: str

@@ -159,6 +159,14 @@ def publish_discovery(client):
             }, ensure_ascii=False))
     # User-facing review: the buttons are inert unless exactly matching
     # unresolved attempt is displayed. Their payload is refreshed per attempt.
+    mqtt_publish(client, 'homeassistant/sensor/innosvet_gas_closing/config', json.dumps({
+        'name': 'innosvět – denní závěrečný odečet',
+        'unique_id': 'innosvet_gas_closing_v1',
+        'state_topic': STATE_PREFIX + '/gas_closing/state',
+        'json_attributes_topic': STATE_PREFIX + '/gas_closing/attributes',
+        'availability_topic': STATE_PREFIX + '/availability',
+        'device': device, 'icon': 'mdi:calendar-check',
+    }, ensure_ascii=False))
     mqtt_publish(client, 'homeassistant/sensor/innosvet_gas_review/config', json.dumps({
         'name': 'innosvět – kontrola odečtu',
         'unique_id': 'innosvet_gas_review_v1',
@@ -404,6 +412,57 @@ def publish_gas_review(client):
                                  'icon': icon}, ensure_ascii=False))
 
 
+
+RECOVERY_TOPIC = STATE_PREFIX + '/gas_closing/recover_command'
+
+
+def publish_daily_closing(client, options):
+    """Display the oldest unresolved daily snapshot, never invent a reading."""
+    from gas_write import oldest_closing_for_review
+    item = oldest_closing_for_review()
+    mqtt_publish(client, STATE_PREFIX + '/gas_closing/state',
+                 item['status'] if item else 'bez nevyřešeného denního odečtu')
+    mqtt_publish(client, STATE_PREFIX + '/gas_closing/attributes',
+                 json.dumps({'datum': item['date'] if item else None,
+                             'stav_m3': item['reading'] if item else None,
+                             'zmereno': item['observed_at'] if item else None,
+                             'stav': item['status'] if item else None,
+                             'upozorneni': ('Oprava je možná jen pro ověřeně neodeslaný stav; '
+                                             'při nejistém výsledku vyžaduje kontrolu.' if item else '')},
+                            ensure_ascii=False))
+    eligible = (item and item['status'] in ('not_sent', 'verified_not_recorded')
+                and options['gas_write_enabled'] and options['gas_write_confirmed'])
+    token = f"{item['date']}|{item['reading']}|{item['slot']}" if eligible else 'NONE'
+    mqtt_publish(client, 'homeassistant/button/innosvet_gas_closing_recover/config',
+                 json.dumps({'name': 'innosvět – odeslat uložený denní odečet',
+                             'unique_id': 'innosvet_gas_closing_recover_v1',
+                             'command_topic': RECOVERY_TOPIC,
+                             'payload_press': token,
+                             'availability_topic': STATE_PREFIX + '/availability',
+                             'device': {'identifiers': ['innosvet_finance_readonly'],
+                                        'name': 'innogy innosvět'},
+                             'icon': 'mdi:calendar-arrow-right'}, ensure_ascii=False))
+
+
+def prepare_recovery_command(payload, now, options):
+    """Only a deliberate button press can request historical POST.
+
+    Confirmed absence is required if any network request may have been sent.
+    Nothing is submitted for an ambiguous attempt.
+    """
+    from gas_write import oldest_closing_for_review, validate_historical_closing
+    if not (options['gas_write_enabled'] and options['gas_write_confirmed']):
+        raise ValueError('Skutečné odesílání není povoleno')
+    item = oldest_closing_for_review()
+    if not item or item['status'] not in ('not_sent', 'verified_not_recorded'):
+        raise ValueError('Není dostupný jednoznačně neodeslaný denní odečet')
+    if payload != f"{item['date']}|{item['reading']}|{item['slot']}":
+        raise ValueError('Neplatný nebo zastaralý příkaz opravy')
+    if item['date'] >= now.date().isoformat():
+        raise ValueError('Historický odečet musí být za uzavřený den')
+    validate_historical_closing(item['date'], item['reading'])
+    return item
+
 def apply_review_command(payload):
     from gas_write import resolve_reviewed_attempt
     import re
@@ -432,13 +491,15 @@ def main():
         review_queue = queue.Queue()
         def _review_message(_client, _userdata, message):
             try:
-                review_queue.put_nowait(message.payload.decode('ascii'))
+                review_queue.put_nowait((message.topic, message.payload.decode('ascii')))
             except (UnicodeDecodeError, ValueError):
                 LOG.warning('Plyn: neplatný požadavek na kontrolu odečtu')
         client.on_message = _review_message
         client.subscribe(REVIEW_COMMAND_TOPIC, qos=1)
+        client.subscribe(RECOVERY_TOPIC, qos=1)
         publish_gas_review(client)
-        LOG.info("Spuštěno innosvět 0.1.0-alpha17; časy: %s; automatický zápis plynu: %s",
+        publish_daily_closing(client, options)
+        LOG.info("Spuštěno innosvět 0.1.0-alpha18; časy: %s; automatický zápis plynu: %s",
                  ", ".join(options["times"]), "POVOLEN" if options["gas_write_enabled"] and options["gas_write_confirmed"] else "VYPNUT / POUZE KONTROLA")
         if options["gas_write_enabled"] and not options["gas_write_confirmed"]:
             LOG.warning("Zápis plynu je v režimu kontroly: finální odeslání vypnuto")
@@ -449,18 +510,56 @@ def main():
         while not STOP:
             try:
                 while True:
-                    command = review_queue.get_nowait()
+                    topic, command = review_queue.get_nowait()
                     try:
-                        if apply_review_command(command):
-                            LOG.warning('Plyn: uživatel uzavřel konkrétní nepotvrzený odečet; nic neodesláno')
+                        if topic == REVIEW_COMMAND_TOPIC:
+                            if apply_review_command(command):
+                                LOG.warning('Plyn: uživatel uzavřel konkrétní nepotvrzený odečet; nic neodesláno')
+                                # Review can clear an ambiguous historical attempt;
+                                # do not automatically retry it.
+                        elif topic == RECOVERY_TOPIC:
+                            from gas_write import write_gas, set_daily_closing_status
+                            moment = datetime.now(tz)
+                            item = prepare_recovery_command(command, moment, options)
+                            repair_slot = moment.strftime('%Y-%m-%dT%H:%M') + f"-repair-{item['date']}"
+                            LOG.warning('Plyn: vyžádané dodatečné odeslání dne %s, stav %s m³',
+                                        item['date'], item['reading'])
+                            try:
+                                status, value = write_gas(options, moment, repair_slot,
+                                                          historical=(item['date'], item['reading']),
+                                                          reading_override=item['reading'])
+                                LOG.info('Plyn: opravný zápis dne %s výsledek %s', item['date'], status)
+                                mqtt_publish(client, STATE_PREFIX + '/gas_write_status', status)
+                            except Exception as exc:
+                                LOG.warning('Plyn: opravný pokus selhal (%s); bez opakování', type(exc).__name__)
+                                mqtt_publish(client, STATE_PREFIX + '/gas_write_status', 'chyba')
+                        else:
+                            LOG.warning('Plyn: neznámý MQTT příkaz ignorován')
                     except (ValueError, RuntimeError, OSError) as exc:
-                        LOG.warning('Plyn: potvrzení odmítnuto (%s); bez změny', type(exc).__name__)
+                        LOG.warning('Plyn: příkaz odmítnut (%s); bez zápisu', type(exc).__name__)
                     publish_gas_review(client)
+                    publish_daily_closing(client, options)
             except queue.Empty:
                 pass
             now = datetime.now(tz)
             slot = (now.date().isoformat(), now.strftime("%H:%M"))
             due = slot[1] in options["times"] and slot != last_day_slot
+            closing_reading = None
+            closing_date = None
+            if due and slot[1] == options['times'][-1]:
+                # Read the meter BEFORE potentially slow portal navigation.
+                # This remains local even when final sending is disabled.
+                from gas_write import get_reading, capture_daily_closing
+                closing_date = slot[0]
+                try:
+                    closing_reading = get_reading(options['gas_entity_id'])
+                    capture_daily_closing(closing_date, slot[0] + 'T' + slot[1],
+                                          closing_reading, now.isoformat())
+                except Exception as exc:
+                    LOG.warning('Plyn: závěrečný denní stav se nepodařilo uložit (%s); nelze jej zpětně rekonstruovat',
+                                type(exc).__name__)
+                    closing_reading = None
+                publish_daily_closing(client, options)
             if (first_run and options.get("read_on_start", True)) or due:
                 if due:
                     last_day_slot = slot
@@ -479,17 +578,30 @@ def main():
                     mqtt_publish(client, STATE_PREFIX + "/last_read_status", "chyba")
             # Write is due only at scheduled times, never merely because HAOS rebooted.
             # Read and write failures must not affect one another.
+            if due and closing_date and not options['gas_write_enabled']:
+                from gas_write import set_daily_closing_status
+                set_daily_closing_status(closing_date, 'not_sent')
+                publish_daily_closing(client, options)
             if due and options["gas_write_enabled"]:
                 from gas_write import write_gas
                 try:
-                    status, reading = write_gas(options, now, slot[0] + "T" + slot[1])
+                    if closing_date and closing_reading is None:
+                        raise RuntimeError('Chybí bezpečně uložený denní stav')
+                    status, reading = write_gas(options, now, slot[0] + "T" + slot[1],
+                                                reading_override=closing_reading)
                     mqtt_publish(client, STATE_PREFIX + "/gas_write_status", status)
                     mqtt_publish(client, STATE_PREFIX + "/gas_write_attributes", json.dumps({
                         "last_attempt": datetime.now(tz).isoformat(timespec="seconds"),
                         "reading_m3": reading, "slot": slot[0] + " " + slot[1],
                     }, ensure_ascii=False))
                     LOG.info("Plyn: výsledek plánovaného běhu: %s", status)
+                    if closing_date:
+                        from gas_write import set_daily_closing_status
+                        set_daily_closing_status(closing_date, 'confirmed' if status == 'success'
+                                                 else 'preview_only' if status == 'preview_form_ready'
+                                                 else 'awaiting_review')
                     publish_gas_review(client)
+                    publish_daily_closing(client, options)
                 except Exception as exc:
                     from gas_write import GasReadError
                     if isinstance(exc, GasReadError):
@@ -497,7 +609,14 @@ def main():
                     else:
                         LOG.warning("Plyn: zápis nepotvrzen (%s), bez automatického opakování", type(exc).__name__)
                     mqtt_publish(client, STATE_PREFIX + "/gas_write_status", "chyba")
+                    if closing_date:
+                        from gas_write import set_daily_closing_status, journal_read
+                        attempt = journal_read().get('attempts', {}).get(slot[0] + 'T' + slot[1])
+                        status = 'uncertain' if attempt and attempt.get('status') in (
+                            'reserved', 'uncertain', 'first_step_uncertain', 'final_step_uncertain') else 'not_sent'
+                        set_daily_closing_status(closing_date, status)
                     publish_gas_review(client)
+                    publish_daily_closing(client, options)
             first_run = False
             for _ in range(20):
                 if STOP:

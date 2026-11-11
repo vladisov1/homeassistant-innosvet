@@ -1,3 +1,14 @@
+## 0.1.0-alpha18 (2026-11-11) – uchování denního stavu a kontrolovaná oprava
+
+- Závěrečný stav plynoměru se při posledním plánovaném termínu dne místně uloží do perzistentního deníku **před** otevřením portálu; datum, čas a původní hodnota se nepřepočítávají z aktuálního senzoru.
+- Nový MQTT senzor „innosvět – denní závěrečný odečet“ a tlačítko „innosvět – odeslat uložený denní odečet“.
+- Opravný zápis staršího dne je **pouze na výslovný stisk tlačítka**, jen když původní pokus nebyl odeslán nebo uživatel potvrdil, že nebyl zaznamenán. Při nejistém výsledku nelze automaticky opakovat.
+- Před pokusem se kontroluje návaznost vůči známým dřívějším i novějším **potvrzeným** zápisům; portál může mít jiné záznamy, proto jej nelze z místního deníku úplně ověřit.
+- Při opravě se vyplňuje historické datum normálním ovládáním formuláře; pokud ho portál nedovolí změnit, žádný POST se neprovádí.
+- První/poslední naplánovaný zápis dne a mezilehlá optimalizace zůstávají beze změn; finance a MQTT identity také.
+- Výpadek Home Assistantu v okamžiku závěrečného termínu nelze zrekonstruovat bez zdroje historických hodnot: takový stav se **nevymýšlí** a automaticky nedoplňuje.
+- Statické a lokální testy nejsou ostrým ověřením portálu. **Nový opravný zápis zatím není otestován v živém innosvětě; při testování nejprve vypněte skutečné odesílání.**
+
 ## 0.1.0-alpha17 (2026-11-11) – ruční kontrola odečtů v Home Assistantu
 
 - Nový MQTT senzor se stavem nejstaršího nepotvrzeného zápisu a atributy datum/čas a stav m³.

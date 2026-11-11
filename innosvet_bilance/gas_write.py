@@ -121,6 +121,9 @@ def resolve_reviewed_attempt(review_token):
     attempt['reviewed_at'] = datetime.now().astimezone().isoformat()
     attempt['review_note'] = ('Uživatel ověřil v innosvětě: zaznamenáno' if outcome == 'RECORDED'
                               else 'Uživatel ověřil v innosvětě: nezaznamenáno')
+    closing = journal.get('daily_closings', {}).get(slot[:10])
+    if closing and closing.get('slot') == slot and closing.get('reading') == reading:
+        closing['status'] = 'confirmed' if outcome == 'RECORDED' else 'verified_not_recorded'
     if outcome == 'RECORDED':
         last = journal.get('last_success')
         if last is None or reading >= int(last['reading']):
@@ -141,6 +144,87 @@ def validate_and_reserve(journal, slot, reading, now):
     attempts[slot] = {'status': 'reserved', 'reading': reading, 'at': now.isoformat()}
     journal_save(journal)
 
+
+
+# Persistent, date-bound snapshots. Never reconstruct past readings from a
+# current sensor value. Stored in the same atomically replaced audit journal.
+def capture_daily_closing(local_date, slot, reading, observed_at):
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', local_date):
+        raise ValueError('Neplatné datum závěrečného odečtu')
+    datetime.strptime(local_date, '%Y-%m-%d')
+    if not isinstance(reading, int) or reading <= 0:
+        raise ValueError('Neplatný stav denního odečtu')
+    journal = journal_read()
+    records = journal.setdefault('daily_closings', {})
+    existing = records.get(local_date)
+    if existing:
+        if existing.get('slot') != slot or existing.get('reading') != reading:
+            raise RuntimeError('Denní odečet je již uložen s jinou identitou; kontrola nutná')
+        return existing
+    record = {'slot': slot, 'reading': reading, 'observed_at': observed_at,
+              'status': 'captured', 'source': 'home_assistant_sensor'}
+    records[local_date] = record
+    journal_save(journal)
+    LOG.info('Plyn: závěrečný stav dne %s místně uložen: %s m³', local_date, reading)
+    return record
+
+
+def set_daily_closing_status(local_date, status, slot=None):
+    journal = journal_read()
+    record = journal.get('daily_closings', {}).get(local_date)
+    if not record:
+        return False
+    if slot and record.get('slot') != slot:
+        return False
+    if record.get('status') == 'confirmed' and status != 'confirmed':
+        return False
+    record['status'] = status
+    journal_save(journal)
+    return True
+
+
+def oldest_closing_for_review():
+    records = journal_read().get('daily_closings', {})
+    items = [(day, r) for day, r in records.items()
+             if isinstance(r, dict) and r.get('status') not in ('confirmed', 'skipped')]
+    if not items:
+        return None
+    day, rec = min(items, key=lambda x: x[0])
+    return {'date': day, 'slot': rec['slot'], 'reading': rec['reading'],
+            'status': rec['status'], 'observed_at': rec['observed_at']}
+
+
+def validate_historical_closing(local_date, reading):
+    """Conservative boundaries from locally CONFIRMED successes only.
+
+    These are necessary, not sufficient: the portal may hold other readings.
+    No automatic submission is authorised by this check.
+    """
+    datetime.strptime(local_date, '%Y-%m-%d')
+    journal = journal_read()
+    record = journal.get('daily_closings', {}).get(local_date)
+    if not record or record.get('reading') != reading:
+        raise ValueError('Neexistuje odpovídající uložený denní stav')
+    if record['status'] == 'confirmed':
+        raise ValueError('Denní stav již byl potvrzen')
+    if record['status'] in ('uncertain', 'awaiting_review'):
+        raise ValueError('Výsledek původního zápisu je nejistý; nejprve vyřešte kontrolu')
+    lower = upper = None
+    for at, attempt in journal.get('attempts', {}).items():
+        if not isinstance(attempt, dict) or attempt.get('status') not in ('success', 'verified_recorded'):
+            continue
+        if not isinstance(attempt.get('reading'), int):
+            continue
+        day = at[:10]
+        if day < local_date:
+            lower = attempt['reading'] if lower is None else max(lower, attempt['reading'])
+        elif day > local_date:
+            upper = attempt['reading'] if upper is None else min(upper, attempt['reading'])
+    if lower is not None and reading < lower:
+        raise ValueError('Historický odečet je nižší než předchozí potvrzená hodnota')
+    if upper is not None and reading > upper:
+        raise ValueError('Historický odečet je vyšší než následující potvrzená hodnota')
+    return True
 
 def preview_gas_form(opts, today, reading):
     """Test navigace a vyplnění. Veškeré POST/PUT/PATCH/DELETE na portál blokuje.
@@ -223,7 +307,7 @@ def preview_gas_form(opts, today, reading):
         raise GasReadError('Příprava formuláře innosvěta selhala ve fázi: ' + phase) from None
 
 
-def write_gas(opts, now, slot):
+def write_gas(opts, now, slot, historical=None, reading_override=None):
     """Returns status + value; only performs POST in explicit enabled mode.
 
     Each slot is reserved BEFORE interacting with the remote write form. On an
@@ -232,8 +316,18 @@ def write_gas(opts, now, slot):
     """
     if not opts.get('gas_write_enabled', False):
         return 'disabled', None
-    reading = get_reading(opts['gas_entity_id'])
-    today = f'{now.day}.{now.month}.{now.year}'
+    reading = (reading_override if reading_override is not None else get_reading(opts['gas_entity_id']))
+    if historical is not None:
+        local_date, saved_reading = historical
+        if saved_reading != reading:
+            raise ValueError('Historická hodnota neodpovídá uloženému stavu')
+        validate_historical_closing(local_date, reading)
+        target_day = datetime.strptime(local_date, '%Y-%m-%d')
+        if target_day.date() >= now.date():
+            raise ValueError('Zpětný zápis musí být za minulý den')
+        today = f'{target_day.day}.{target_day.month}.{target_day.year}'
+    else:
+        today = f'{now.day}.{now.month}.{now.year}'
     journal = journal_read()
     # Explicit opt-in: a second independent switch prevents accidental enabling.
     if not opts.get('gas_write_confirmed', False):
@@ -251,14 +345,14 @@ def write_gas(opts, now, slot):
         ) and a.get('reading') == reading
         for a in journal.get('attempts', {}).values()
     )
-    if unresolved_same_value:
+    if unresolved_same_value and historical is None:
         LOG.warning('Plyn: stav %s m³ má předchozí nepotvrzený pokus; automatický zápis pozastaven', reading)
         return 'vyzaduje_kontrolu_historie', reading
     # Optional optimized schedule: retain alpha12 behavior unless explicitly enabled.
     # Always send the first and last slot of the configured local day. Middle slots
     # only send if the integer meter value changed since the last CONFIRMED write.
     # An unknown/uncertain outcome is never silently treated as a success.
-    if opts.get('gas_write_optimized', False):
+    if opts.get('gas_write_optimized', False) and historical is None:
         times = opts['times']
         local_slot = now.strftime('%H:%M')
         first_or_last = local_slot in (times[0], times[-1])
@@ -278,7 +372,16 @@ def write_gas(opts, now, slot):
             return 'beze_zmeny', reading
         LOG.info('Plyn: optimalizace – %s, stav %s m³',
                  'první/poslední čas dne' if first_or_last else 'změna celých m³', reading)
-    validate_and_reserve(journal, slot, reading, now)
+    if historical is None:
+        validate_and_reserve(journal, slot, reading, now)
+    else:
+        # Separate, uniquely identified attempt: original attempt is never edited.
+        attempts = journal.setdefault('attempts', {})
+        if slot in attempts:
+            raise ValueError('Tento opravný pokus již existuje')
+        attempts[slot] = {'status': 'reserved', 'reading': reading,
+                          'at': now.isoformat(), 'historical_date': historical[0]}
+        journal_save(journal)
     attempts = journal['attempts']
     request_sent = False
     phase = 'zahájení zápisu'
@@ -369,8 +472,20 @@ def write_gas(opts, now, slot):
                     raise RuntimeError('Formulář plynu neprošel kontrolou')
                 date = form.locator('input[name="Date"]:visible')
                 count = form.locator('input[name="CountOff"]')
-                if date.count() != 1 or count.count() != 1 or date.input_value().strip() != today:
-                    raise RuntimeError('Datum formuláře nesouhlasí s dnešním dnem')
+                if date.count() != 1 or count.count() != 1:
+                    raise RuntimeError('Nejednoznačné datum nebo stav formuláře')
+                if historical is None:
+                    if date.input_value().strip() != today:
+                        raise RuntimeError('Datum formuláře nesouhlasí s dnešním dnem')
+                else:
+                    # The portal's visible Date input must accept the requested
+                    # historical date by normal interaction. Never bypass readonly
+                    # fields or inject JavaScript state.
+                    if date.input_value().strip() != today:
+                        date.fill(today, timeout=8000)
+                        date.press('Tab')
+                    if date.input_value().strip() != today:
+                        raise RuntimeError('Portál nepřijal historické datum')
                 count.fill(str(reading))
                 if count.input_value() != str(reading):
                     raise RuntimeError('Stav nelze spolehlivě vyplnit')
@@ -503,7 +618,18 @@ def write_gas(opts, now, slot):
                     raise RuntimeError('Finální POST nemá úspěšnou HTTP odpověď')
                 post_gate['phase'] = 'blocked'
                 attempts[slot]['status'] = 'success'
-                journal['last_success'] = {'reading': reading, 'at': datetime.now(now.tzinfo).isoformat()}
+                if historical is None:
+                    journal['last_success'] = {'reading': reading, 'at': datetime.now(now.tzinfo).isoformat()}
+                else:
+                    # Do not regress last_success to an earlier historical reading.
+                    last = journal.get('last_success')
+                    if last is None or reading >= int(last['reading']):
+                        journal['last_success'] = {'reading': reading, 'at': datetime.now(now.tzinfo).isoformat()}
+                if historical is not None:
+                    record = journal.get('daily_closings', {}).get(historical[0])
+                    if record:
+                        record['status'] = 'confirmed'
+                        record['recovered_at'] = datetime.now(now.tzinfo).isoformat()
                 journal_save(journal)
                 LOG.info('Plyn: odečet %s m³ potvrzen stránkou innosvěta', reading)
                 return 'success', reading
@@ -513,6 +639,10 @@ def write_gas(opts, now, slot):
         attempts[slot]['status'] = 'uncertain' if request_sent else 'not_sent'
         attempts[slot]['error_type'] = type(exc).__name__
         attempts[slot]['phase'] = phase
+        if historical is not None:
+            record = journal.get('daily_closings', {}).get(historical[0])
+            if record:
+                record['status'] = 'uncertain' if request_sent else 'not_sent'
         journal_save(journal)
         LOG.warning('Plyn: diagnostika: tlačítko počet=%s, viditelné=%s, aktivní=%s; první POST=%s, finální POST=%s, HTTP=%s; nadpis rekapitulace=%s, finální tlačítko=%s',
                     diagnostic['first_button_count'], diagnostic['first_button_visible'],

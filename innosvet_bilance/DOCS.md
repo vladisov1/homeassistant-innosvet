@@ -141,3 +141,10 @@ Nejasně dokončený zápis **stejné hodnoty** v deníku blokuje nový pokus i 
 ## Graf pro dashboard
 
 Data obsahuje atribut `body_grafu` u dosavadních nákladů obou smluv. Doplněk přikládá samostatnou, na backendu nezávislou grafovou kartu v `dashboard/innosvet-cost-chart.js` a postup nasazení v `dashboard/DASHBOARD-GRAF.md`. Instalace grafu vyžaduje **ruční přidání** JavaScript zdroje a karty v dashboardu. Žádné stávající zobrazení se automaticky nemění.
+
+
+## Závěrečný denní stav a pozdější oprava (alpha18)
+
+Při posledním plánovaném běhu dne se před prací s portálem uloží aktuální stav senzoru do perzistentního deníku. MQTT senzor **innosvět – denní závěrečný odečet** ukazuje nejstarší dosud nevyřízený denní stav. Pro jednoznačně neodeslaný historický stav je dostupné tlačítko **innosvět – odeslat uložený denní odečet**. Tlačítko zahajuje skutečný zápis pouze při zapnutých obou přepínačích odesílání a po ověření historického data a hodnoty. U nejistého výsledku zápis nelze opakovat automaticky. Viz `DOPLNENI-DENNIHO-ODECTU.md`.
+
+Zpětné vyplnění data zatím nebylo testováno na živém innosvětě. Pokud portál historické datum běžným způsobem nepřijme, nepřejde se k POST. Pokud Home Assistant v okamžiku závěrečného času neběžel, doplněk nemá spolehlivý historický stav a záznam nevytvoří.
